@@ -55,6 +55,18 @@ CREATE TABLE IF NOT EXISTS current_caption (
 ''')
 conn.commit()
 
+# Create table to store user-folder approval status
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS user_folder_approval (
+    user_id INTEGER,
+    folder_id INTEGER,
+    approved INTEGER DEFAULT 0, -- 0 = not approved, 1 = approved
+    download_completed INTEGER DEFAULT 0, -- 0 = not downloaded, 1 = downloaded
+    PRIMARY KEY (user_id, folder_id)
+)
+''')
+conn.commit()
+
 # Adds new users to the database
 def add_user_to_db(user_id):
     cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))

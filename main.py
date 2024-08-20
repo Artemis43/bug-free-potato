@@ -42,9 +42,9 @@ dp.register_message_handler(folder.delete_folder, commands=['deletefolder'])
 dp.register_message_handler(download.get_all_files, commands=['download'])
 dp.register_message_handler(setpremium.set_premium_status, commands=['setfolder'])
 dp.register_message_handler(setpremium.set_premium, commands=['setuser'])
+dp.register_message_handler(download.handle_approval, commands=['approve'])
+dp.register_message_handler(download.handle_rejection, commands=['reject'])
 dp.register_message_handler(stop.stop, commands=['stop'])
-dp.register_callback_query_handler(download.handle_approval, Text(startswith="approve_"))
-dp.register_callback_query_handler(download.handle_rejection, Text(startswith="reject_"))
 dp.register_message_handler(about_help.handle_invalid_command, lambda message: not message.text.startswith('/'))
 dp.register_message_handler(
     start.approve_user,

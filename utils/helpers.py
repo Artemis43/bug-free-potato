@@ -2,7 +2,7 @@ import logging
 from aiogram import exceptions, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 #from main import current_upload_folders, bot
-from utils.database import cursor
+from utils.database import cursor, conn
 from config import ADMIN_IDS
 
 # Function to set the current upload folder for a user
@@ -37,21 +37,23 @@ async def notify_admins(user_id, username):
 async def notify_admin_for_approval(user_id: int, folder_id: int, folder_name: str):
     from main import bot
     
-    # Get the first admin's ID
+    # Reset the download_completed field to allow a new download attempt
+    cursor.execute('''
+    UPDATE user_folder_approval
+    SET download_completed = 0
+    WHERE user_id = ? AND folder_id = ?
+    ''', (user_id, folder_id))
+    conn.commit()
+
     first_admin_id = ADMIN_IDS[0]
     
-    # Create inline buttons for approval and rejection with specific prefixes
-    keyboard = InlineKeyboardMarkup()
-    approve_button = InlineKeyboardButton(text="Approve ✅", callback_data=f"approval_approve_{user_id}_{folder_id}")
-    reject_button = InlineKeyboardButton(text="Reject ❌", callback_data=f"approval_reject_{user_id}_{folder_id}")
-    keyboard.add(approve_button, reject_button)
-    
-    # Send the notification to the first admin
+    # Notify the admin to approve or reject by replying with specific commands
     try:
         await bot.send_message(
             first_admin_id, 
-            f"User ID: {user_id} has requested to download the folder '{folder_name}'.\nDo you approve?",
-            reply_markup=keyboard
+            f"User ID: {user_id} has requested to download the folder '{folder_name}'.\n"
+            f"Reply with `/approve {user_id} {folder_id}` to approve.\n"
+            f"Reply with `/reject {user_id} {folder_id}` to reject."
         )
     except Exception as e:
         logging.error(f"Failed to notify admin: {e}")

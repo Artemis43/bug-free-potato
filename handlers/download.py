@@ -53,11 +53,22 @@ async def get_all_files(message: types.Message):
         await message.reply("This folder is for premium users only. Please upgrade to access it.")
         return
 
-    # If admin approval is required, notify admin and exit early
+    # If the folder requires admin approval, apply the approval logic
     if requires_admin_approval:
-        await notify_admin_for_approval(user_id, folder_id, folder_name)
-        await message.reply("Your download request has been sent to the admin for approval.")
-        return
+        cursor.execute('''
+        SELECT approved, download_completed FROM user_folder_approval 
+        WHERE user_id = ? AND folder_id = ?
+        ''', (user_id, folder_id))
+        approval_info = cursor.fetchone()
+
+        if not approval_info or approval_info[0] != 1:
+            await notify_admin_for_approval(user_id, folder_id, folder_name)
+            await message.reply("Your download request has been sent to the admin for approval.")
+            return
+
+        if approval_info[1] == 1:
+            await message.reply("You have already downloaded this folder. Please request approval again if needed.")
+            return
 
     # Simulate connecting to servers with a progress bar
     progress_message = await message.reply("⚡Connecting to servers...\n[░░░░░░░░░░░░░░░░░░░░░]", parse_mode=ParseMode.MARKDOWN)
@@ -156,6 +167,15 @@ async def get_all_files(message: types.Message):
         ''', (current_time.strftime("%Y-%m-%d %H:%M:%S"), user_id))
         conn.commit()
 
+        # If admin approval was required, mark the download as completed
+        if requires_admin_approval:
+            cursor.execute('''
+            UPDATE user_folder_approval
+            SET download_completed = 1
+            WHERE user_id = ? AND folder_id = ?
+            ''', (user_id, folder_id))
+            conn.commit()
+
         # Schedule deletion of messages after the calculated time
         await asyncio.sleep(delete_time)
 
@@ -173,57 +193,46 @@ async def get_all_files(message: types.Message):
     else:
         await message.reply("No files found in the specified folder.")
 
-async def handle_approval(callback_query: types.CallbackQuery):
+async def handle_approval(message: types.Message):
     from main import bot
-    from handlers.download import get_all_files
-    
-    # Check if the callback data starts with 'approval_approve_'
-    if callback_query.data.startswith('approval_approve_'):
-        user_id, folder_id = map(int, callback_query.data.split('_')[2:])
 
-        # Send confirmation to the admin
-        await bot.answer_callback_query(callback_query.id, "You have approved the request.")
+    try:
+        _, user_id, folder_id = message.text.split()
+        user_id, folder_id = int(user_id), int(folder_id)
         
-        # Notify the user that their request was approved
-        try:
-            await bot.send_message(user_id, "Your request to download the folder has been approved by the admin. Your download will now begin.")
-        except exceptions.BotBlocked:
-            logging.warning(f"Bot was blocked by user {user_id}, unable to send approval message.")
-            return
+        # Update the approval status in the database
+        cursor.execute('''
+        INSERT INTO user_folder_approval (user_id, folder_id, approved) 
+        VALUES (?, ?, 1)
+        ON CONFLICT(user_id, folder_id) DO UPDATE SET approved = 1, download_completed = 0
+        ''', (user_id, folder_id))
+        conn.commit()
 
-        # Trigger the file sending process
-        class DummyMessage:
-            def __init__(self, user_id, folder_name):
-                self.from_user = types.User(id=user_id, is_bot=False, first_name="User")
-                self.text = f"/download {folder_name}"
-                self.chat = types.Chat(id=user_id, type="private")
-            
-            def get_args(self):
-                return self.text.split(' ', 1)[1]  # Extract folder name
+        # Notify the user that they are approved
+        await bot.send_message(user_id, "Your request to download the folder has been approved by the admin. You can now download it.")
+        await message.reply("User has been approved.")
+        
+    except Exception as e:
+        logging.error(f"Error in handle_approval: {e}")
+        await message.reply("Failed to approve the user.")
 
-        # Fetch the folder name
-        cursor.execute('SELECT name FROM folders WHERE id = ?', (folder_id,))
-        folder_info = cursor.fetchone()
-
-        if folder_info:
-            folder_name = folder_info[0]
-            dummy_message = DummyMessage(user_id, folder_name)
-            await get_all_files(dummy_message)
-        else:
-            logging.error(f"Folder with ID {folder_id} not found for user {user_id}.")
-
-async def handle_rejection(callback_query: types.CallbackQuery):
+async def handle_rejection(message: types.Message):
     from main import bot
-    
-    # Check if the callback data starts with 'approval_reject_'
-    if callback_query.data.startswith('approval_reject_'):
-        user_id, folder_id = map(int, callback_query.data.split('_')[2:])
 
-        # Send confirmation to the admin
-        await bot.answer_callback_query(callback_query.id, "You have rejected the request.")
+    try:
+        _, user_id, folder_id = message.text.split()
+        user_id, folder_id = int(user_id), int(folder_id)
+
+        # Update the approval status in the database to rejected
+        cursor.execute('''
+        DELETE FROM user_folder_approval WHERE user_id = ? AND folder_id = ?
+        ''', (user_id, folder_id))
+        conn.commit()
+
+        # Notify the user that they are rejected
+        await bot.send_message(user_id, "Your request to download the folder has been rejected by the admin.")
+        await message.reply("User's request has been rejected.")
         
-        # Notify the user that their request was rejected
-        try:
-            await bot.send_message(user_id, "Your request to download the folder has been rejected by the admin.")
-        except exceptions.BotBlocked:
-            logging.warning(f"Bot was blocked by user {user_id}, unable to send rejection message.")
+    except Exception as e:
+        logging.error(f"Error in handle_rejection: {e}")
+        await message.reply("Failed to reject the user.")
