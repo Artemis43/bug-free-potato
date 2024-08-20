@@ -37,15 +37,32 @@ async def handle_document(message: types.Message):
                 await message.reply("You are not authorized to upload a new database file.")
                 return
 
-            file_path = f"new_{message.document.file_name}"
-            await message.document.download(destination_file=file_path)
+            # Define the path to the old and new database files
+            old_db_path = DB_FILE_PATH
+            new_file_path = f"new_{message.document.file_name}"
 
-            shutil.move(file_path, DB_FILE_PATH)
-            awaiting_new_db_upload = False
-            await message.reply("Database file replaced successfully. Restarting the bot to apply changes.")
+            # Download the new database file
+            await message.document.download(destination_file=new_file_path)
 
-            os.execl(sys.executable, sys.executable, *sys.argv)
-            return
+            try:
+                # Delete the old database file
+                if os.path.exists(old_db_path):
+                    os.remove(old_db_path)
+                    await message.reply("Old database file deleted successfully.")
+                else:
+                    await message.reply("Old database file not found. Proceeding with the replacement.")
+
+                # Move the new file to replace the old database
+                shutil.move(new_file_path, DB_FILE_PATH)
+                awaiting_new_db_upload = False
+                await message.reply("Database file replaced successfully. Restarting the bot to apply changes.")
+
+                # Restart the bot to apply the new database changes
+                os.execl(sys.executable, sys.executable, *sys.argv)
+            except Exception as e:
+                awaiting_new_db_upload = False
+                await message.reply(f"An error occurred while replacing the database file: {e}")
+                return
 
         if str(user_id) not in ADMIN_IDS:
             await message.reply("You are not authorized to upload files.")
@@ -81,18 +98,6 @@ async def handle_document(message: types.Message):
             specific_caption = message.caption or "@Medical_Contentbot\nEver-growing archive of medical content"
 
         # Proceed with the file upload
-        current_upload_folder = get_current_upload_folder(user_id)
-        if current_upload_folder:
-            cursor.execute('SELECT id FROM folders WHERE name = ?', (current_upload_folder,))
-            folder_id = cursor.fetchone()
-            if folder_id:
-                folder_id = folder_id[0]
-            else:
-                folder_id = None
-        else:
-            folder_id = None
-
-        # Send the file to the channel with the specific caption and get the message ID
         sent_message = await bot.send_document(CHANNEL_ID, file_id, caption=specific_caption)
         message_id = sent_message.message_id
 
