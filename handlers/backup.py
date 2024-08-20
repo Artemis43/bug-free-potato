@@ -2,7 +2,6 @@ import logging
 from aiogram import types
 from config import ADMIN_IDS
 from middlewares.authorization import is_private_chat
-#from bot import bot
 from utils.database import conn
 
 async def send_backup(message: types.Message):

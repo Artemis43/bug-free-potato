@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 import asyncio
 import logging
-#from main import bot
 from aiogram import types, exceptions
 from config import REQUIRED_CHANNELS
 from aiogram.types import ParseMode
@@ -47,6 +46,11 @@ async def get_all_files(message: types.Message):
         return
 
     folder_id, is_premium_folder, requires_admin_approval = folder_info
+
+    # Check if the folder is premium and if the user is allowed to access it
+    if is_premium_folder and not is_premium:
+        await message.reply("This folder is for premium users only. Please upgrade to access it.")
+        return
 
     # If the folder requires admin approval, apply the approval logic
     if requires_admin_approval:

@@ -1,6 +1,5 @@
 import logging
 import sys
-#from main import bot
 from aiogram import types
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS

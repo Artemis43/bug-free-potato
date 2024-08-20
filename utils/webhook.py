@@ -1,5 +1,4 @@
 import logging
-#from main import bot
 from config import WEBHOOK_URL
 from utils.database import conn
 

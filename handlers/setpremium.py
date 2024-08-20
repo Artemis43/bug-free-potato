@@ -1,7 +1,6 @@
 import logging
 import sqlite3
 import asyncio
-#from main import bot
 from datetime import datetime, timedelta
 from aiogram import types, exceptions
 from config import REQUIRED_CHANNELS, ADMIN_IDS

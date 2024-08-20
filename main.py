@@ -2,7 +2,6 @@ import logging
 from aiogram import types
 from aiogram import Bot, Dispatcher
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
-from aiogram.dispatcher.filters import Text
 from config import API_TOKEN, ADMIN_IDS
 from keep_alive import keep_alive
 

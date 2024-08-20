@@ -2,7 +2,6 @@ import asyncio
 import logging
 from aiogram import types, exceptions
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-#from main import bot
 from middlewares.authorization import is_private_chat, is_user_member
 from utils.database import add_user_to_db, cursor, conn
 from utils.helpers import notify_admins

@@ -1,5 +1,4 @@
 from config import REQUIRED_CHANNELS
-#from main import bot
 from aiogram import types
 import logging
 

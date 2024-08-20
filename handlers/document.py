@@ -2,7 +2,6 @@ import shutil
 import os
 import sys
 from aiogram import types
-#from main import bot
 from config import ADMIN_IDS, REQUIRED_CHANNELS, DB_FILE_PATH, CHANNEL_ID
 from middlewares.authorization import is_private_chat, is_user_member
 from utils.database import cursor, conn

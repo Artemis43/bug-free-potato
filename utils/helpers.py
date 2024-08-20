@@ -1,7 +1,6 @@
 import logging
 from aiogram import exceptions
 from aiogram.types import ParseMode
-#from main import current_upload_folders, bot
 from utils.database import cursor, conn
 from config import ADMIN_IDS
 

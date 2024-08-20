@@ -1,5 +1,4 @@
 from aiogram import types, exceptions
-#from main import bot
 from middlewares.authorization import is_private_chat, is_user_member
 from config import ADMIN_IDS, REQUIRED_CHANNELS, CHANNEL_ID
 from utils.database import cursor, conn

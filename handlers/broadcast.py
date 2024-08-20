@@ -2,7 +2,6 @@ import logging
 from aiogram import types
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS
-#from bot import bot
 from utils.database import cursor
 
 async def broadcast_message(message: types.Message):
