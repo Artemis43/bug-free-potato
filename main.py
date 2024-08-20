@@ -1,4 +1,5 @@
 import logging
+from aiogram import types
 from aiogram import Bot, Dispatcher
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.dispatcher.filters import Text
@@ -23,6 +24,19 @@ awaiting_new_db_upload = False
 # So that all admins can upload files simultaneously
 current_upload_folders = {}
 
+async def new_db(message: types.Message):
+    from middlewares.authorization import is_private_chat
+    if not is_private_chat(message):
+        return
+    global awaiting_new_db_upload
+
+    if str(message.from_user.id) not in ADMIN_IDS:
+        await message.reply("You are not authorized to upload a new database file.")
+        return
+
+    awaiting_new_db_upload = True
+    await message.reply("Please upload the new 'file_management.db' file to replace the existing database.")
+
 from handlers import start, backup, broadcast, caption, document, getlist, folder, download, setpremium, stop, about_help
 
 # Register handlers
@@ -30,7 +44,7 @@ dp.register_message_handler(start.handle_start, commands=['start'])
 dp.register_message_handler(about_help.about, commands=['about'])
 dp.register_message_handler(about_help.help, commands=['help'])
 dp.register_message_handler(backup.send_backup, commands=['backup'])
-dp.register_message_handler(backup.new_db, commands=['restore'])
+dp.register_message_handler(new_db, commands=['restore'])
 dp.register_message_handler(broadcast.broadcast_message, commands=['broadcast'])
 dp.register_message_handler(caption.set_caption, commands=['caption'])
 dp.register_message_handler(document.handle_document, content_types=['document'])
