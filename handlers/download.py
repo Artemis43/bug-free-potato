@@ -5,7 +5,7 @@ from aiogram import types, exceptions
 from config import REQUIRED_CHANNELS
 from aiogram.types import ParseMode
 from aiogram.utils.exceptions import MessageNotModified
-from utils.helpers import notify_admin_for_approval
+from utils.helpers import notify_admin_for_approval, notify_admin_for_approval_again
 from middlewares.authorization import is_private_chat, is_user_member
 from utils.database import cursor, conn
 
@@ -66,7 +66,8 @@ async def get_all_files(message: types.Message):
             return
 
         if approval_info[1] == 1:
-            await message.reply("You have already downloaded this folder. Please request approval again if needed.")
+            await notify_admin_for_approval_again(user_id, folder_id, folder_name)
+            await message.reply("You have already downloaded this folder once. Please contact the Admin to download it again.")
             return
 
     # Temporarily grant premium status if the folder requires admin approval
@@ -100,7 +101,7 @@ async def get_all_files(message: types.Message):
 
     # Update the folder_type based on whether it is premium or requires admin approval
     if requires_admin_approval:
-        folder_type = "Paid-Premium"
+        folder_type = "Paid"
     elif is_premium_folder:
         folder_type = "Premium"
     else:
@@ -228,7 +229,7 @@ async def handle_approval(message: types.Message):
         conn.commit()
 
         # Notify the user that they are approved
-        await bot.send_message(user_id, "Your request to download the folder has been approved by the admin. You can now download it.")
+        await bot.send_message(user_id, "Your request to download the folder has been approved by the admin. You can now download it.\n\nOnly 01 download is allowed.\nYou will be given Premium download speed.")
         await message.reply("User has been approved.")
         
     except Exception as e:
@@ -249,7 +250,7 @@ async def handle_rejection(message: types.Message):
         conn.commit()
 
         # Notify the user that they are rejected
-        await bot.send_message(user_id, "Your request to download the folder has been rejected by the admin.")
+        await bot.send_message(user_id, "Your request to download the folder has been rejected by the admin. If you think this is a mistake, contact the Admin.")
         await message.reply("User's request has been rejected.")
         
     except Exception as e:

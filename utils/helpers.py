@@ -73,3 +73,30 @@ async def notify_admin_for_approval(user_id: int, folder_id: int, folder_name: s
         )
     except Exception as e:
         logging.error(f"Failed to notify admin: {e}")
+
+# Notifies Admin for REDUNDANT folder download approval/rejection
+async def notify_admin_for_approval_again(user_id: int, folder_id: int, folder_name: str):
+    from main import bot
+    
+    # Reset the download_completed field to allow a new download attempt
+    cursor.execute('''
+    UPDATE user_folder_approval
+    SET download_completed = 0
+    WHERE user_id = ? AND folder_id = ?
+    ''', (user_id, folder_id))
+    conn.commit()
+
+    first_admin_id = ADMIN_IDS[0]
+    
+    # Notify the admin to approve or reject by replying with specific commands
+    try:
+        await bot.send_message(
+            first_admin_id,
+            "*ALERT! - 2nd TIME" 
+            f"*User ID:* `{user_id}` has requested to download the folder *'{folder_name}'*.\n"
+            f"Reply with `/approve {user_id} {folder_id}` to approve.\n"
+            f"Reply with `/reject {user_id} {folder_id}` to reject.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        logging.error(f"Failed to notify admin: {e}")
