@@ -27,7 +27,7 @@ async def help(message: types.Message):
             "|- Send and get all your files👌\n\n"
             "**NOTE:\n\n**"
             "`We donot host any content.`"
-            #"**Contact Us:** [Here](https://t.me/MedContent_Adminbot)"
+            #"**Contact Us:** [Here](https://t.me/Art3mis_adminbot)"
         )
         await message.reply(help_text, parse_mode='Markdown')
 

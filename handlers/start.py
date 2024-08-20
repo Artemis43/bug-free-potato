@@ -76,10 +76,10 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
     text += "\n\n\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\n\n"
 
     if is_premium_user:
-        text += f"`To download Paid-folders,`\n👉 [Contact Admin](https://t.me/MedContent_Adminbot)"
+        text += f"`To download Paid-folders,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
         #text += f"**Your premium status expires on:** `{expiration_date_str}`\n\n"
     else:
-        text += f"`For Paid-folders OR Premium,`\n👉 [Contact Admin](https://t.me/MedContent_Adminbot)"
+        text += f"`For Paid-folders OR Premium,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
 
     try:
         if message_id:
@@ -161,7 +161,7 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
     for folder in folders:
         text += f"|-📒 `{folder[0]}`\n"
 
-    text += "\n\n\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\n\n`Please share any files that you may think are useful to others :D` - [Share](https://t.me/MedContent_Adminbot)"
+    text += "\n\n\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\n\n`Please share any files that you may think are useful to others :D` - [Share](https://t.me/Art3mis_adminbot)"
 
     try:
         if message_id:
@@ -206,7 +206,7 @@ async def handle_start(message: types.Message):
             await bot.delete_message(message.chat.id, sticker_msg.message_id)
             await send_ui(message.chat.id)
     elif user[0] == 'rejected':
-        await message.answer("Your access request has been rejected. You cannot use this bot 😢\n\nIf you think this is a mistake, Contact Us: @MedContent_Adminbot")
+        await message.answer("Your access request has been rejected. You cannot use this bot 😢\n\nIf you think this is a mistake, Contact Us: @Art3mis_adminbot")
 
 """async def handle_start(message: types.Message):
     from main import bot
@@ -239,7 +239,7 @@ async def handle_start(message: types.Message):
             await bot.delete_message(message.chat.id, sticker_msg.message_id)
             await send_ui(message.chat.id)
     elif user[0] == 'rejected':
-        await message.answer("Your access request has been rejected. You cannot use this bot 😢\n\nIf you think this is a mistake, Contact Us: @MedContent_Adminbot")"""
+        await message.answer("Your access request has been rejected. You cannot use this bot 😢\n\nIf you think this is a mistake, Contact Us: @Art3mis_adminbot")"""
 
 
 async def approve_user(message: types.Message):
@@ -264,7 +264,7 @@ async def reject_user(message: types.Message):
     conn.commit()
     await message.answer(f"User {user_id} has been rejected.")
     try:
-        await bot.send_message(user_id, "You have been rejected from using the bot 🫤\n\nIf you think this is a mistake, **Contact Us:** @MedContent_Adminbot")
+        await bot.send_message(user_id, "You have been rejected from using the bot 🫤\n\nIf you think this is a mistake, **Contact Us:** @Art3mis_adminbot")
     except exceptions.BotBlocked:
         logging.warning(f"User {user_id} has blocked the bot.")
     except exceptions.ChatNotFound:
