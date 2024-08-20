@@ -48,11 +48,6 @@ async def get_all_files(message: types.Message):
 
     folder_id, is_premium_folder, requires_admin_approval = folder_info
 
-    # Check if the folder is premium and if the user is allowed to access it
-    if is_premium_folder and not is_premium:
-        await message.reply("This folder is for premium users only. Please upgrade to access it.")
-        return
-
     # If the folder requires admin approval, apply the approval logic
     if requires_admin_approval:
         cursor.execute('''
@@ -70,6 +65,12 @@ async def get_all_files(message: types.Message):
             await message.reply("You have already downloaded this folder. Please request approval again if needed.")
             return
 
+    # Temporarily grant premium status if the folder requires admin approval
+    temporary_premium = False
+    if requires_admin_approval and not is_premium:
+        temporary_premium = True
+        is_premium = 1  # Grant premium status temporarily
+
     # Simulate connecting to servers with a progress bar
     progress_message = await message.reply("⚡Connecting to servers...\n[░░░░░░░░░░░░░░░░░░░░░]", parse_mode=ParseMode.MARKDOWN)
 
@@ -84,11 +85,7 @@ async def get_all_files(message: types.Message):
     # Display "Download starting..." message for 3 seconds
     await progress_message.edit_text("🚀Download is starting...", parse_mode=ParseMode.MARKDOWN)
     await asyncio.sleep(3)
-
-    # Update the message to show the information
-    user_type = "Premium" if is_premium else "Free"
-    folder_type = "Premium" if is_premium_folder else "Free"
-
+    
     # Determine if a delay should be applied between files
     file_interval = 5 if is_premium else 60  # 5 seconds for premium users, 1 minute (60 seconds) for free users
 
@@ -97,7 +94,15 @@ async def get_all_files(message: types.Message):
 
     next_download_time = (time_interval.total_seconds() / 60)
 
-    # Customize the info_message based on user type
+    # Update the folder_type based on whether it is premium or requires admin approval
+    if requires_admin_approval:
+        folder_type = "Paid-Premium"
+    elif is_premium_folder:
+        folder_type = "Premium"
+    else:
+        folder_type = "Free"
+
+    # Customize the info_message based on user type and folder type
     if is_premium:
         info_message = (
             f"🎉 *Premium User*\n\n"
@@ -118,6 +123,7 @@ async def get_all_files(message: types.Message):
             f"Next Download only after `{int(next_download_time)} mins`\n\n"
             "🎉 *Consider Upgrading to Premium for Faster Downloads!*"
         )
+
 
     await progress_message.edit_text(info_message, parse_mode=ParseMode.MARKDOWN)
 
@@ -147,12 +153,12 @@ async def get_all_files(message: types.Message):
 
         messages_to_delete = []
 
-        for file in files:
+        for index, file in enumerate(files):
             sent_message = await bot.send_document(message.chat.id, file[0], caption=file[2])
             messages_to_delete.append(sent_message.message_id)
 
-            # Wait for the appropriate interval before sending the next file
-            if file_interval > 0:
+            # Wait for the appropriate interval before sending the next file, except after the last file
+            if file_interval > 0 and index < len(files) - 1:
                 await asyncio.sleep(file_interval)
 
         # Notify the user that files will be deleted and start the countdown immediately
@@ -174,6 +180,15 @@ async def get_all_files(message: types.Message):
             SET download_completed = 1
             WHERE user_id = ? AND folder_id = ?
             ''', (user_id, folder_id))
+            conn.commit()
+
+        # Revert the premium status if it was temporarily granted
+        if temporary_premium:
+            cursor.execute('''
+            UPDATE users
+            SET premium = 0
+            WHERE user_id = ?
+            ''', (user_id,))
             conn.commit()
 
         # Schedule deletion of messages after the calculated time

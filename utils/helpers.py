@@ -1,6 +1,6 @@
 import logging
-from aiogram import exceptions, types
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram import exceptions
+from aiogram.types import ParseMode
 #from main import current_upload_folders, bot
 from utils.database import cursor, conn
 from config import ADMIN_IDS
@@ -67,9 +67,10 @@ async def notify_admin_for_approval(user_id: int, folder_id: int, folder_name: s
     try:
         await bot.send_message(
             first_admin_id, 
-            f"User ID: {user_id} has requested to download the folder '{folder_name}'.\n"
+            f"*User ID:* `{user_id}` has requested to download the folder *'{folder_name}'*.\n"
             f"Reply with `/approve {user_id} {folder_id}` to approve.\n"
-            f"Reply with `/reject {user_id} {folder_id}` to reject."
+            f"Reply with `/reject {user_id} {folder_id}` to reject.",
+            parse_mode=ParseMode.MARKDOWN
         )
     except Exception as e:
         logging.error(f"Failed to notify admin: {e}")
