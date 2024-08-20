@@ -24,3 +24,19 @@ async def send_backup(message: types.Message):
     except Exception as e:
         logging.error(f"Error sending backup file: {e}")
         await message.reply("Error sending backup file. Please try again later.")
+
+
+async def new_db(message: types.Message):
+    from middlewares.authorization import is_private_chat
+    if not is_private_chat(message):
+        return
+    global awaiting_new_db_upload
+
+    from main import awaiting_new_db_upload
+
+    if str(message.from_user.id) not in ADMIN_IDS:
+        await message.reply("You are not authorized to upload a new database file.")
+        return
+
+    awaiting_new_db_upload = True
+    await message.reply("Please upload the new 'file_management.db' file to replace the existing database.")

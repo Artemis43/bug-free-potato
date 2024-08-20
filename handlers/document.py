@@ -29,6 +29,8 @@ async def handle_document(message: types.Message):
     else:
         global awaiting_new_db_upload
 
+        from main import awaiting_new_db_upload
+
         if awaiting_new_db_upload and message.document.file_name == "file_management.db":
             if str(user_id) not in ADMIN_IDS:
                 awaiting_new_db_upload = False
