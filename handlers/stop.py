@@ -3,7 +3,7 @@ import sys
 from aiogram import types
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS
-from utils.database import cursor
+from utils.database import cursor, conn
 
 async def stop(message: types.Message):
     from main import bot
@@ -16,6 +16,19 @@ async def stop(message: types.Message):
     await message.reply("Bot is stopping...")
 
     try:
+
+        # Commit any pending transactions to ensure the database is up to date
+        conn.commit()
+
+        # Path to the database file
+        db_file_path = 'file_management.db'
+    
+        try:
+            await bot.send_document(message.chat.id, types.InputFile(db_file_path))
+        except Exception as e:
+            logging.error(f"Error sending backup file: {e}")
+            await message.reply("Error sending backup file. Please try again later.")
+
         # Fetch all users from the database
         cursor.execute('SELECT user_id FROM users')
         user_ids = cursor.fetchall()

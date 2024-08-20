@@ -92,7 +92,7 @@ async def notify_admin_for_approval_again(user_id: int, folder_id: int, folder_n
     try:
         await bot.send_message(
             first_admin_id,
-            "*ALERT! - 2nd TIME" 
+            "*ALERT! - 2nd TIME\n" 
             f"*User ID:* `{user_id}` has requested to download the folder *'{folder_name}'*.\n"
             f"Reply with `/approve {user_id} {folder_id}` to approve.\n"
             f"Reply with `/reject {user_id} {folder_id}` to reject.",

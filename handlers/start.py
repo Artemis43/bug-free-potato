@@ -73,7 +73,13 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
 
         text += f"|-📒 `{folder_name}`{label}\n"
 
-    text += "\n\n\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\n\n`To get Premium/download Paid-files,`\n👉[Contact Now](https://t.me/MedContent_Adminbot)"
+    text += "\n\n\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\n\n"
+
+    if is_premium_user:
+        text += f"`To download Paid-folders,`\n👉 [Contact Admin](https://t.me/MedContent_Adminbot)"
+        #text += f"**Your premium status expires on:** `{expiration_date_str}`\n\n"
+    else:
+        text += f"`For Paid-folders OR Premium,`\n👉 [Contact Admin](https://t.me/MedContent_Adminbot)"
 
     try:
         if message_id:

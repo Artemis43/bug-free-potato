@@ -21,14 +21,12 @@ async def help(message: types.Message):
     else:
         help_text = (
             "*The Medical Content Bot* ✨\n\n"
-            "/start - Start the bot\n"
-            "/help - Display this help message\n"
             "/download <folder\\_name> - Send with Folder name to get all files\n\n"
             "💫 *How to Use:*\n\n"
             "|- Put folder name after /download\n\n"
             "|- Send and get all your files👌\n\n"
             "**NOTE:\n\n**"
-            "`We donot host any content; All the content is from third-party servers.`"
+            "`We donot host any content.`"
             #"**Contact Us:** [Here](https://t.me/MedContent_Adminbot)"
         )
         await message.reply(help_text, parse_mode='Markdown')
@@ -54,14 +52,13 @@ async def about(message: types.Message):
     else:
         about_text = (
             "*The Medical Content Bot ✨*\n\n"
-            "I knew Telegram was a gold mine for all the students who are interested to learn\n"
-            "But, most of my time was gone in the search of the desired content. Thus, I came up with an idea of this bot!\n\n"
-            "However, sometimes the things I would create may need some help to be alive...\nAlone, I do so little. Believe me when I say this - Together, we can do much better!\n\n"
-            "*Upgrade to Premium:* [Here](https://t.me/medcontentbotinformation/2)\n\n"
+            "I knew Telegram was a gold mine for all the students\n"
+            "Thus, I came up with an idea of this bot!\n\n"
+            "However, sometimes the things I would create may need some help to be alive.\nAlone, I do so little. Believe me when I say this - Together, we can do much better!\n\n"
+            "🫡 [Upgrade to Premium](https://t.me/medcontentbotinformation/2)\n\n"
             "About the Bot:\n"
             "Usage limit - `1 CPU|2 GB (RAM)`\n"
-            "Hosting Cost ~ `₹560/Month`\n"
-            "Framework - `Python-Flask`\n\n"
+            "Hosting Cost ~ `₹560/Month`\n\n"
             "All the Best!"
         )
         await message.reply(about_text, parse_mode='Markdown')

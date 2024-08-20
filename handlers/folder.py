@@ -33,7 +33,7 @@ async def create_folder(message: types.Message):
 
         if len(args) > 1 and args[1].strip().upper() == 'PREMIUM':
             premium = 1
-        if len(args) > 2 and args[2].strip().upper() == 'ADMIN_APPROVAL':
+        if len(args) > 2 and args[2].strip().upper() == 'PAID':
             admin_approval = 1
 
         if not folder_name:
