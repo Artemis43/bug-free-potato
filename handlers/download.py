@@ -123,6 +123,17 @@ async def get_all_files(message: types.Message):
     files = cursor.fetchall()
 
     if files:
+        # Determine the time to delete messages based on the number of files
+        num_files = len(files)
+        if num_files <= 25:
+            delete_time = 120  # 2 minutes in seconds
+        elif num_files <= 50:
+            delete_time = 180  # 3 minutes in seconds
+        elif num_files <= 75:
+            delete_time = 240  # 4 minutes in seconds
+        else:
+            delete_time = 300  # Default to 5 minutes if more than 75 files
+
         messages_to_delete = []
 
         for file in files:
@@ -144,17 +155,6 @@ async def get_all_files(message: types.Message):
         WHERE user_id = ?
         ''', (current_time.strftime("%Y-%m-%d %H:%M:%S"), user_id))
         conn.commit()
-
-        # Determine the time to delete messages based on the number of files
-        num_files = len(files)
-        if num_files <= 25:
-            delete_time = 120  # 2 minutes in seconds
-        elif num_files <= 50:
-            delete_time = 180  # 3 minutes in seconds
-        elif num_files <= 75:
-            delete_time = 240  # 4 minutes in seconds
-        else:
-            delete_time = 300  # Default to 5 minutes if more than 75 files
 
         # Schedule deletion of messages after the calculated time
         await asyncio.sleep(delete_time)
