@@ -15,6 +15,22 @@ def get_current_upload_folder(user_id):
     from main import current_upload_folders
     return current_upload_folders.get(user_id)
 
+# Function to set the DB upload await state
+def set_bot_state(key: str, value: bool):
+    cursor.execute('''
+        INSERT INTO bot_state (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    ''', (key, int(value)))
+    conn.commit()
+
+# Function to get the DB upload await state
+def get_bot_state(key: str) -> bool:
+    cursor.execute('SELECT value FROM bot_state WHERE key = ?', (key,))
+    result = cursor.fetchone()
+    if result:
+        return bool(result[0])
+    return False
+
 # Notifies Admins for approve/reject permission of the bot for new users
 async def notify_admins(user_id, username):
     from main import bot

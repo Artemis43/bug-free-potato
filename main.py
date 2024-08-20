@@ -18,7 +18,7 @@ dp = Dispatcher(bot)
 dp.middleware.setup(LoggingMiddleware())
 
 # New db upload initiated only during /restore
-awaiting_new_db_upload = False
+# awaiting_new_db_upload = False
 
 # Global dictionary to track the current upload folder for each admin
 # So that all admins can upload files simultaneously
