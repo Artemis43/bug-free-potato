@@ -40,10 +40,10 @@ async def notify_admin_for_approval(user_id: int, folder_id: int, folder_name: s
     # Get the first admin's ID
     first_admin_id = ADMIN_IDS[0]
     
-    # Create inline buttons for approval and rejection
+    # Create inline buttons for approval and rejection with specific prefixes
     keyboard = InlineKeyboardMarkup()
-    approve_button = InlineKeyboardButton(text="Approve ✅", callback_data=f"approve_{user_id}_{folder_id}")
-    reject_button = InlineKeyboardButton(text="Reject ❌", callback_data=f"reject_{user_id}_{folder_id}")
+    approve_button = InlineKeyboardButton(text="Approve ✅", callback_data=f"approval_approve_{user_id}_{folder_id}")
+    reject_button = InlineKeyboardButton(text="Reject ❌", callback_data=f"approval_reject_{user_id}_{folder_id}")
     keyboard.add(approve_button, reject_button)
     
     # Send the notification to the first admin

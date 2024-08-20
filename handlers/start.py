@@ -89,23 +89,25 @@ async def process_callback(callback_query: types.CallbackQuery):
     global current_upload_folder
     user_id = callback_query.from_user.id
 
-    if not await is_user_member(user_id):
-        join_message = "Welcome to The Medical Content Bot ✨\n\nI have the ever-growing archive of Medical content 👾\n\nJoin our backup channels to remain connected ✊\n"
-        for channel in REQUIRED_CHANNELS:
-            join_message += f"{channel}\n"
+    # Check if the callback data is not related to approval or rejection
+    if not callback_query.data.startswith('approval_'):
+        if not await is_user_member(user_id):
+            join_message = "Welcome to The Medical Content Bot ✨\n\nI have the ever-growing archive of Medical content 👾\n\nJoin our backup channels to remain connected ✊\n"
+            for channel in REQUIRED_CHANNELS:
+                join_message += f"{channel}\n"
+            await bot.answer_callback_query(callback_query.id)
+            await bot.send_message(callback_query.from_user.id, join_message)
+            return
+
+        code = callback_query.data
+
+        if code == 'root':
+            await send_ui(callback_query.from_user.id, callback_query.message.message_id)
+        else:
+            current_upload_folder = code
+            await send_ui(callback_query.from_user.id, callback_query.message.message_id, current_folder=current_upload_folder)
+
         await bot.answer_callback_query(callback_query.id)
-        await bot.send_message(callback_query.from_user.id, join_message)
-        return
-
-    code = callback_query.data
-
-    if code == 'root':
-        await send_ui(callback_query.from_user.id, callback_query.message.message_id)
-    else:
-        current_upload_folder = code
-        await send_ui(callback_query.from_user.id, callback_query.message.message_id, current_folder=current_upload_folder)
-
-    await bot.answer_callback_query(callback_query.id)
 
 """# The UI of the bot
 async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter=None):

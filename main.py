@@ -43,7 +43,6 @@ dp.register_message_handler(download.get_all_files, commands=['download'])
 dp.register_message_handler(setpremium.set_premium_status, commands=['setfolder'])
 dp.register_message_handler(setpremium.set_premium, commands=['setuser'])
 dp.register_message_handler(stop.stop, commands=['stop'])
-dp.register_callback_query_handler(start.process_callback, lambda c: c.data)
 dp.register_callback_query_handler(download.handle_approval, Text(startswith="approve_"))
 dp.register_callback_query_handler(download.handle_rejection, Text(startswith="reject_"))
 dp.register_message_handler(about_help.handle_invalid_command, lambda message: not message.text.startswith('/'))
@@ -55,6 +54,7 @@ dp.register_message_handler(
     start.reject_user,
     lambda message: message.text.startswith('/reject_') and str(message.from_user.id) in ADMIN_IDS
 )
+dp.register_callback_query_handler(start.process_callback, lambda c: c.data)
 
 from utils.webhook import on_startup, on_shutdown
 
