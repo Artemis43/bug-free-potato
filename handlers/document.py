@@ -1,6 +1,7 @@
 import shutil
 import os
 import sys
+import logging
 from aiogram import types
 from config import ADMIN_IDS, REQUIRED_CHANNELS, DB_FILE_PATH, CHANNEL_ID
 from middlewares.authorization import is_private_chat, is_user_member
@@ -63,15 +64,12 @@ async def handle_upload(message: types.Message, file_type: str):
     file_name = message.document.file_name if file_type == 'document' else message.video.file_name if file_type == 'video' else f"photo_{user_id}"
 
     current_upload_folder = get_current_upload_folder(user_id)
+    folder_id = None
     if current_upload_folder:
         cursor.execute('SELECT id FROM folders WHERE name = ?', (current_upload_folder,))
-        folder_id = cursor.fetchone()
-        if folder_id:
-            folder_id = folder_id[0]
-        else:
-            folder_id = None
-    else:
-        folder_id = None
+        folder = cursor.fetchone()
+        if folder:
+            folder_id = folder[0]
 
     cursor.execute('SELECT caption_type, custom_text FROM current_caption ORDER BY id DESC LIMIT 1')
     caption_config = cursor.fetchone()
@@ -85,20 +83,25 @@ async def handle_upload(message: types.Message, file_type: str):
     else:
         specific_caption = message.caption or "@Medical_Contentbot\nEver-growing archive of medical content"
 
-    if file_type == 'document':
-        sent_message = await bot.send_document(CHANNEL_ID, file_id, caption=specific_caption)
-    elif file_type == 'video':
-        sent_message = await bot.send_video(CHANNEL_ID, file_id, caption=specific_caption)
-    elif file_type == 'photo':
-        sent_message = await bot.send_photo(CHANNEL_ID, file_id, caption=specific_caption)
+    try:
+        if file_type == 'document':
+            sent_message = await bot.send_document(CHANNEL_ID, file_id, caption=specific_caption)
+        elif file_type == 'video':
+            sent_message = await bot.send_video(CHANNEL_ID, file_id, caption=specific_caption)
+        elif file_type == 'photo':
+            sent_message = await bot.send_photo(CHANNEL_ID, file_id, caption=specific_caption)
 
-    message_id = sent_message.message_id
+        message_id = sent_message.message_id
 
-    cursor.execute('INSERT INTO files (file_id, file_name, folder_id, message_id, caption) VALUES (?, ?, ?, ?, ?)', 
-                   (file_id, file_name, folder_id, message_id, specific_caption))
-    conn.commit()
+        cursor.execute('INSERT INTO files (file_id, file_name, folder_id, message_id, caption, file_type) VALUES (?, ?, ?, ?, ?, ?)', 
+                       (file_id, file_name, folder_id, message_id, specific_caption, file_type))
+        conn.commit()
 
-    await message.reply(f"File '{file_name}' uploaded successfully with the caption: {specific_caption}")
+        await message.reply(f"File '{file_name}' uploaded successfully with the caption: {specific_caption}")
+
+    except Exception as e:
+        logging.error(f"Error during file upload: {e}")
+        await message.reply(f"An error occurred while uploading the file: {e}")
 
 # Handling document upload
 async def handle_document(message: types.Message):
