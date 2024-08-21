@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS folders (
 )
 ''')
 
-# Table to manage files
+## Table to manage files
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS files (
     folder_id INTEGER,
     message_id INTEGER,
     caption TEXT,  -- Custom caption for the file
+    file_type TEXT NOT NULL,  -- Type of the file ('document', 'video', 'photo')
     FOREIGN KEY (folder_id) REFERENCES folders (id)
 )
 ''')

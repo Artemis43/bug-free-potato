@@ -141,7 +141,7 @@ async def get_all_files(message: types.Message):
     conn.commit()
 
     # Get the file IDs, names, and captions in the folder
-    cursor.execute('SELECT file_id, file_name, caption FROM files WHERE folder_id = ?', (folder_id,))
+    cursor.execute('SELECT file_id, file_name, caption, file_type FROM files WHERE folder_id = ?', (folder_id,))
     files = cursor.fetchall()
 
     if files:
@@ -159,7 +159,17 @@ async def get_all_files(message: types.Message):
         messages_to_delete = []
 
         for index, file in enumerate(files):
-            sent_message = await bot.send_document(message.chat.id, file[0], caption=file[2])
+            file_id, file_name, caption, file_type = file
+
+            if file_type == 'document':
+                sent_message = await bot.send_document(message.chat.id, file_id, caption=caption)
+            elif file_type == 'video':
+                sent_message = await bot.send_video(message.chat.id, file_id, caption=caption)
+            elif file_type == 'photo':
+                sent_message = await bot.send_photo(message.chat.id, file_id, caption=caption)
+            else:
+                continue  # Skip any unknown file types
+
             messages_to_delete.append(sent_message.message_id)
 
             # Wait for the appropriate interval before sending the next file, except after the last file
