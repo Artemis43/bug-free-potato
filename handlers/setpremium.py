@@ -60,7 +60,7 @@ async def set_premium(message: types.Message):
         action = action.lower()
 
         if action == 'on':
-            expiration_date = datetime.now() + timedelta(days=15)
+            expiration_date = datetime.now() + timedelta(days=10)
             cursor.execute('''
                 UPDATE users 
                 SET premium = 1, premium_expiration = ? 
@@ -71,7 +71,7 @@ async def set_premium(message: types.Message):
             await message.reply(f"User {user_id} has been marked as premium until {expiration_date}.")
             
             try:
-                await bot.send_message(user_id, "Congratulations! You have been upgraded to Premium for 15 days.")
+                await bot.send_message(user_id, "Congratulations! You have been upgraded to Premium for 10 days.")
             except exceptions.BotBlocked:
                 await message.reply(f"Could not notify user {user_id}, as they have blocked the bot.")
 
