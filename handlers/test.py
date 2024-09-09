@@ -1,4 +1,18 @@
 import requests
+import sqlite3
+
+def get_db_connection(db_path):
+    # Close existing connection if any
+    global conn
+    if conn:
+        conn.close()
+    
+    # Connect to the new database file
+    conn = sqlite3.connect(db_path)
+    return conn
+
+# Global connection variable
+conn = None
 
 def download_database(api_key, db_owner, db_name, db_path):
     url = 'https://api.dbhub.io/v1/download'
@@ -30,6 +44,9 @@ def sync_database(api_key, db_owner, db_name, db_path):
     
     # Download the new database from dbhub.io
     download_database(api_key, db_owner, db_name, db_path)
+
+    # Reconnect to the new database
+    get_db_connection(db_path)
 
 from aiogram.types import ParseMode
 from aiogram import types
