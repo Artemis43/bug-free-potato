@@ -7,6 +7,7 @@ from utils.database import add_user_to_db, cursor, conn
 from utils.helpers import notify_admins
 from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, API_KEY, DB_FILE_PATH, DBNAME, DBOWNER
 from datetime import datetime, timedelta
+import asyncio
 
 # Global variables to track the last sync time and the lock
 last_sync_time = None
@@ -63,18 +64,27 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
     # Check if there are no folders
     if not folders:
         text += "No folders available. Please wait while the database is being synced.\n"
+
+        # Display the UI immediately, even if there are no folders
+        try:
+            if message_id:
+                await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=keyboard, parse_mode='Markdown')
+            else:
+                await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='Markdown')
+        except exceptions.MessageNotModified:
+            pass  # Handle the exception gracefully by ignoring it
+
+        # Trigger the sync operation in the background
         now = datetime.now()
-        
-        # Check if at least 20 minutes have passed since the last sync
         if last_sync_time is None or (now - last_sync_time) >= timedelta(minutes=20):
             async with sync_lock:
                 if last_sync_time is None or (datetime.now() - last_sync_time) >= timedelta(minutes=20):
                     last_sync_time = datetime.now()  # Update the last sync time
                     asyncio.create_task(sync.sync_database(api_key=API_KEY, db_owner=DBOWNER, db_name=DBNAME, db_path=DB_FILE_PATH))
                 else:
-                    text += "Sync is already in progress. Please wait a moment.\n"
+                    print("Sync is already in progress. Please wait a moment.")
         else:
-            text += "Sync was recently performed. Please try again later.\n"
+            print("Sync was recently performed. Please try again later.")
 
     else:
         # Add folders to the text with appropriate labeling
@@ -87,21 +97,21 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
 
             text += f"|-📒 `{folder_name}`{label}\n"
 
-    text += "\n\n\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\n\n"
+        # Display the UI with folder listings
+        text += "\n\n\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\n\n"
 
-    if is_premium_user:
-        text += f"`To download Paid-folders,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
-    else:
-        text += f"`For Paid-folders OR Premium,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
-
-    # Display the UI to the user, regardless of folder availability
-    try:
-        if message_id:
-            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=keyboard, parse_mode='Markdown')
+        if is_premium_user:
+            text += f"`To download Paid-folders,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
         else:
-            await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='Markdown')
-    except exceptions.MessageNotModified:
-        pass  # Handle the exception gracefully by ignoring it
+            text += f"`For Paid-folders OR Premium,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
+
+        try:
+            if message_id:
+                await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=keyboard, parse_mode='Markdown')
+            else:
+                await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='Markdown')
+        except exceptions.MessageNotModified:
+            pass  # Handle the exception gracefully by ignoring it
 
 async def process_callback(callback_query: types.CallbackQuery):
     from main import bot
