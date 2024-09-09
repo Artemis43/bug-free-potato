@@ -23,7 +23,7 @@ dp.middleware.setup(LoggingMiddleware())
 # So that all admins can upload files simultaneously
 current_upload_folders = {}
 
-from handlers import start, backup, broadcast, caption, document, getlist, folder, download, setpremium, stop, about_help
+from handlers import start, backup, broadcast, caption, document, getlist, folder, download, setpremium, stop, about_help, test
 
 # Register handlers
 dp.register_message_handler(start.handle_start, commands=['start'])
@@ -46,6 +46,7 @@ dp.register_message_handler(setpremium.set_premium, commands=['setuser'])
 dp.register_message_handler(download.handle_approval, commands=['approve'])
 dp.register_message_handler(download.handle_rejection, commands=['reject'])
 dp.register_message_handler(stop.stop, commands=['stop'])
+dp.register_message_handler(test.sync_database_command, commands=['syncdb'])
 dp.register_message_handler(
     start.approve_user,
     lambda message: message.text.startswith('/approve_') and str(message.from_user.id) in ADMIN_IDS
