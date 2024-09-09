@@ -63,11 +63,10 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
     # Check if there are no folders
     if not folders:
         text += "No folders available. Please wait while the database is being synced.\n"
-
-        # Check if at least 20 minutes have passed since the last sync
         now = datetime.now()
+        
+        # Check if at least 20 minutes have passed since the last sync
         if last_sync_time is None or (now - last_sync_time) >= timedelta(minutes=20):
-            # Acquire the lock to ensure only one sync operation runs
             async with sync_lock:
                 if last_sync_time is None or (datetime.now() - last_sync_time) >= timedelta(minutes=20):
                     last_sync_time = datetime.now()  # Update the last sync time
@@ -95,6 +94,7 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
     else:
         text += f"`For Paid-folders OR Premium,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
 
+    # Display the UI to the user, regardless of folder availability
     try:
         if message_id:
             await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=keyboard, parse_mode='Markdown')
