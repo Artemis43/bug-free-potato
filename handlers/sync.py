@@ -3,6 +3,7 @@ import shutil
 import requests
 import sys
 import subprocess
+from config import API_KEY, DB_FILE_PATH, DBNAME, DBOWNER
 
 # Path to the flag file
 FLAG_FILE_PATH = 'restart_flag.tmp'
@@ -82,5 +83,5 @@ from aiogram.types import ParseMode
 from aiogram import types
 
 async def sync_database_command(message: types.Message):
-    sync_database(api_key='ir9dho0AwDNuDN-TTQIiy0qYJIsE3BP35hqYBVgax4OJUeplyakzzg', db_owner='norse', db_name='file_management.db', db_path='file_management.db')
-    await message.reply("Database has been synced with dbhub.io.", parse_mode=ParseMode.MARKDOWN)
+    sync_database(api_key=API_KEY , db_owner=DBOWNER, db_name=DBNAME, db_path=DB_FILE_PATH)
+    await message.reply("Database has now been synced. You can use the bot now", parse_mode=ParseMode.MARKDOWN)

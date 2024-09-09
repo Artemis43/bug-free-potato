@@ -5,7 +5,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from middlewares.authorization import is_private_chat, is_user_member
 from utils.database import add_user_to_db, cursor, conn
 from utils.helpers import notify_admins
-from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS
+from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, API_KEY, DB_FILE_PATH, DBNAME, DBOWNER
 
 async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter=None):
     from main import bot
@@ -35,16 +35,6 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
     is_premium_user = user_data and user_data[0] == 1
     premium_expiration = user_data[1] if is_premium_user else None
 
-    """# Convert premium_expiration to a datetime object if it exists
-    expiration_date_str = "Unknown"
-    if premium_expiration:
-        try:
-            # Assuming the premium_expiration is stored in a format like 'YYYY-MM-DD HH:MM:SS'
-            premium_expiration = datetime.strptime(premium_expiration, '%Y-%m-%d %H:%M:%S')
-            expiration_date_str = premium_expiration.strftime('%Y-%m-%d')
-        except ValueError:
-            premium_expiration = None  # Handle any unexpected date format"""
-
     # Compose the UI message text
     text = f"Hello {chat_name}👋,\n\n"
     text += f"*I'm The Medical Content Bot* ✨\n"
@@ -53,7 +43,6 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
 
     if is_premium_user:
         text += f"🥳 *You are a Premium User!*\n\n"
-        #text += f"**Your premium status expires on:** `{expiration_date_str}`\n\n"
     else:
         text += f"🌟 [Upgrade to Premium](https://t.me/medcontentbotinformation/2)\n\n"
 
@@ -63,21 +52,27 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
     cursor.execute('SELECT name, premium, admin_approval FROM folders WHERE parent_id IS NULL ORDER BY name')
     folders = cursor.fetchall()
 
-    # Add folders to the text with appropriate labeling
-    for folder_name, premium, admin_approval in folders:
-        label = ""
-        if not is_premium_user and premium:
-            label = " (Premium)"
-        elif admin_approval:
-            label = " (Paid)"
+    # Check if there are no folders
+    if not folders:
+        from handlers import sync
+        text += "No folders available. Please sync with the database.\n"
+        await sync.sync_database(api_key=API_KEY , db_owner=DBOWNER, db_name=DBNAME, db_path=DB_FILE_PATH)  # Call your sync command here
 
-        text += f"|-📒 `{folder_name}`{label}\n"
+    else:
+        # Add folders to the text with appropriate labeling
+        for folder_name, premium, admin_approval in folders:
+            label = ""
+            if not is_premium_user and premium:
+                label = " (Premium)"
+            elif admin_approval:
+                label = " (Paid)"
+
+            text += f"|-📒 `{folder_name}`{label}\n"
 
     text += "\n\n\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\n\n"
 
     if is_premium_user:
         text += f"`To download Paid-folders,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
-        #text += f"**Your premium status expires on:** `{expiration_date_str}`\n\n"
     else:
         text += f"`For Paid-folders OR Premium,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
 

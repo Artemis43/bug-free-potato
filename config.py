@@ -22,3 +22,8 @@ WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 # Database file
 DB_FILE_PATH = 'file_management.db'
+
+# DBHub.io Credentials
+API_KEY = 'ir9dho0AwDNuDN-TTQIiy0qYJIsE3BP35hqYBVgax4OJUeplyakzzg'
+DBOWNER = 'norse'
+DBNAME = 'file_management.db'
