@@ -63,7 +63,7 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
 
     # Check if there are no folders
     if not folders:
-        text += "No folders available. Please wait while the database is being synced.\n"
+        text += "😴😴\nHey there! Sorry I was asleep😅\nTry again in 60 secs."
 
         # Display the UI even if there are no folders
         try:
@@ -86,7 +86,7 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
                 else:
                     print("Sync is already in progress. Please wait.")
         else:
-            print("Sync was recently performed. Please try again later.")
+            print("Sync was recently performed. Contact the admin.")
 
     else:
         # Add folders to the text with appropriate labeling

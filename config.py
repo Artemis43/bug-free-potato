@@ -24,6 +24,6 @@ WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 DB_FILE_PATH = 'file_management.db'
 
 # DBHub.io Credentials
-API_KEY = 'ir9dho0AwDNuDN-TTQIiy0qYJIsE3BP35hqYBVgax4OJUeplyakzzg'
+API_KEY = os.environ.get('DB_API')
 DBOWNER = 'norse'
 DBNAME = 'file_management.db'

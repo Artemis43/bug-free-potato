@@ -2,7 +2,7 @@ import logging
 import requests
 import threading
 import time
-from config import WEBHOOK_URL, DB_FILE_PATH
+from config import WEBHOOK_URL, DB_FILE_PATH, DBNAME, API_KEY
 from utils.database import conn
 
 async def on_startup(dispatcher):
@@ -10,7 +10,7 @@ async def on_startup(dispatcher):
     await bot.set_webhook(WEBHOOK_URL)
 
      # Start the periodic upload in a background thread
-    start_periodic_upload(api_key='ir9dho0AwDNuDN-TTQIiy0qYJIsE3BP35hqYBVgax4OJUeplyakzzg', db_name= DB_FILE_PATH, db_path= DB_FILE_PATH)
+    start_periodic_upload(api_key= API_KEY, db_name= DBNAME, db_path= DB_FILE_PATH)
 
 async def on_shutdown(dispatcher):
     from main import bot

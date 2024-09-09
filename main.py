@@ -46,7 +46,7 @@ dp.register_message_handler(setpremium.set_premium, commands=['setuser'])
 dp.register_message_handler(download.handle_approval, commands=['approve'])
 dp.register_message_handler(download.handle_rejection, commands=['reject'])
 dp.register_message_handler(stop.stop, commands=['stop'])
-dp.register_message_handler(sync.sync_database_command, commands=['syncdb'])
+dp.register_message_handler(sync.sync_database_command, commands=['forcedsyncdb'])
 dp.register_message_handler(
     start.approve_user,
     lambda message: message.text.startswith('/approve_') and str(message.from_user.id) in ADMIN_IDS

@@ -3,9 +3,11 @@ import shutil
 import requests
 import sys
 import subprocess
-from config import API_KEY, DB_FILE_PATH, DBNAME, DBOWNER
+from middlewares.authorization import is_private_chat
+from config import API_KEY, DB_FILE_PATH, DBNAME, DBOWNER, ADMIN_IDS
 
 # Path to the flag file
+# This file is to prevent infinite loops
 FLAG_FILE_PATH = 'restart_flag.tmp'
 
 # Function to delete the local database
@@ -36,6 +38,7 @@ def download_database(api_key, db_owner, db_name, temp_db_path):
         print(f"An error occurred while downloading the database: {e}")
 
 # Function to replace the local database with the downloaded file
+# Has a similar functionality as in backup and restore of a database
 def replace_local_database(db_path, temp_db_path):
     if os.path.exists(temp_db_path):
         try:
@@ -87,5 +90,10 @@ from aiogram.types import ParseMode
 from aiogram import types
 
 async def sync_database_command(message: types.Message):
+    if not is_private_chat(message):
+        return
+    if str(message.from_user.id) not in ADMIN_IDS:
+        await message.reply("You are not authorized to stop the bot.")
+        return
     sync_database(api_key=API_KEY , db_owner=DBOWNER, db_name=DBNAME, db_path=DB_FILE_PATH)
     await message.reply("Database has now been synced. You can use the bot now", parse_mode=ParseMode.MARKDOWN)
