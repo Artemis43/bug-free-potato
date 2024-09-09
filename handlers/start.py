@@ -56,7 +56,7 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
     if not folders:
         from handlers import sync
         text += "No folders available. Please sync with the database.\n"
-        await sync.sync_database(api_key=API_KEY , db_owner=DBOWNER, db_name=DBNAME, db_path=DB_FILE_PATH)  # Call your sync command here
+        sync.sync_database(api_key=API_KEY , db_owner=DBOWNER, db_name=DBNAME, db_path=DB_FILE_PATH)  # Call your sync command here
 
     else:
         # Add folders to the text with appropriate labeling
