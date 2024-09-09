@@ -51,20 +51,24 @@ def replace_local_database(db_path, temp_db_path):
 
 # Function to restart the script using subprocess
 def restart_script():
-    if not os.path.exists(FLAG_FILE_PATH):
-        with open(FLAG_FILE_PATH, 'w') as flag_file:
-            flag_file.write('restart')
-        
-        print("Restarting script...")
-        try:
-            subprocess.run([sys.executable] + sys.argv, check=True)
-        except Exception as e:
-            print(f"An error occurred while restarting the script: {e}")
-        finally:
-            # Remove the flag file after the restart
+    # Only restart if the script is not already being restarted
+    if os.path.exists(FLAG_FILE_PATH):
+        print("Script already in the process of restarting. Skipping restart.")
+        return
+    
+    # Create the flag file to indicate a restart is in progress
+    with open(FLAG_FILE_PATH, 'w') as flag_file:
+        flag_file.write('restart')
+    
+    print("Restarting script...")
+    try:
+        subprocess.run([sys.executable] + sys.argv, check=True)
+    except Exception as e:
+        print(f"An error occurred while restarting the script: {e}")
+    finally:
+        # Remove the flag file after the restart attempt to avoid looping restarts
+        if os.path.exists(FLAG_FILE_PATH):
             os.remove(FLAG_FILE_PATH)
-    else:
-        print("Script already restarted. Skipping restart.")
 
 # Main sync function
 def sync_database(api_key, db_owner, db_name, db_path):
