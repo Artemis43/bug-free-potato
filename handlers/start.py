@@ -6,9 +6,17 @@ from middlewares.authorization import is_private_chat, is_user_member
 from utils.database import add_user_to_db, cursor, conn
 from utils.helpers import notify_admins
 from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, API_KEY, DB_FILE_PATH, DBNAME, DBOWNER
+from datetime import datetime, timedelta
+
+# Global variables to track the last sync time and the lock
+last_sync_time = None
+sync_lock = asyncio.Lock()
 
 async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter=None):
     from main import bot
+    from handlers import sync  # Import the sync module
+    global last_sync_time
+
     # Fetch the number of files and folders
     cursor.execute('SELECT COUNT(*) FROM folders')
     folder_count = cursor.fetchone()[0]
@@ -54,9 +62,20 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
 
     # Check if there are no folders
     if not folders:
-        from handlers import sync
-        text += "No folders available. Please sync with the database.\n"
-        sync.sync_database(api_key=API_KEY , db_owner=DBOWNER, db_name=DBNAME, db_path=DB_FILE_PATH)  # Call your sync command here
+        text += "No folders available. Please wait while the database is being synced.\n"
+
+        # Check if at least 20 minutes have passed since the last sync
+        now = datetime.now()
+        if last_sync_time is None or (now - last_sync_time) >= timedelta(minutes=20):
+            # Acquire the lock to ensure only one sync operation runs
+            async with sync_lock:
+                if last_sync_time is None or (datetime.now() - last_sync_time) >= timedelta(minutes=20):
+                    last_sync_time = datetime.now()  # Update the last sync time
+                    asyncio.create_task(sync.sync_database(api_key=API_KEY, db_owner=DBOWNER, db_name=DBNAME, db_path=DB_FILE_PATH))
+                else:
+                    text += "Sync is already in progress. Please wait a moment.\n"
+        else:
+            text += "Sync was recently performed. Please try again later.\n"
 
     else:
         # Add folders to the text with appropriate labeling
