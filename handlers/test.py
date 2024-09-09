@@ -1,20 +1,18 @@
+import os
+import shutil
 import requests
-import sqlite3
+import sys
 
-def get_db_connection(db_path):
-    # Close existing connection if any
-    global conn
-    if conn:
-        conn.close()
-    
-    # Connect to the new database file
-    conn = sqlite3.connect(db_path)
-    return conn
+# Function to delete the local database
+def delete_local_database(db_path):
+    if os.path.exists(db_path):
+        os.remove(db_path)
+        print("Local database deleted successfully.")
+    else:
+        print("Local database not found.")
 
-# Global connection variable
-conn = None
-
-def download_database(api_key, db_owner, db_name, db_path):
+# Function to download the database from dbhub.io
+def download_database(api_key, db_owner, db_name, temp_db_path):
     url = 'https://api.dbhub.io/v1/download'
     response = requests.post(
         url,
@@ -23,30 +21,37 @@ def download_database(api_key, db_owner, db_name, db_path):
     
     status_code = response.status_code
     if status_code == 200:
-        with open(db_path, 'wb') as file:
+        with open(temp_db_path, 'wb') as file:
             file.write(response.content)
         print("Database downloaded and saved successfully.")
     else:
         print(f"Failed to download database: Status Code: {status_code}, Response: {response.content.decode()}")
 
-import os
-
-def delete_local_database(db_path):
+# Function to replace the local database with the downloaded file
+def replace_local_database(db_path, temp_db_path):
     if os.path.exists(db_path):
         os.remove(db_path)
-        print("Local database deleted successfully.")
-    else:
-        print("Local database not found.")
+        print("Existing local database removed.")
+    shutil.move(temp_db_path, db_path)
+    print("New database file set successfully.")
 
+# Function to restart the script
+def restart_script():
+    print("Restarting script...")
+    os.execl(sys.executable, sys.executable, *sys.argv)
+
+# Main sync function
 def sync_database(api_key, db_owner, db_name, db_path):
-    # Delete the local database
-    delete_local_database(db_path)
+    temp_db_path = db_path + '.tmp'
     
-    # Download the new database from dbhub.io
-    download_database(api_key, db_owner, db_name, db_path)
-
-    # Reconnect to the new database
-    get_db_connection(db_path)
+    # Download the new database
+    download_database(api_key, db_owner, db_name, temp_db_path)
+    
+    # Replace the old database with the new one
+    replace_local_database(db_path, temp_db_path)
+    
+    # Restart the script to ensure the bot uses the new database
+    restart_script()
 
 from aiogram.types import ParseMode
 from aiogram import types
