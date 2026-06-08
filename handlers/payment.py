@@ -871,6 +871,3 @@ async def cmd_payconfig(message: types.Message):
             f"Unknown subcommand <code>{esc(sub)}</code>. Use <code>/payconfig list</code> to see options.",
             parse_mode=ParseMode.HTML
         )
-to see options.",
-            parse_mode=ParseMode.HTML
-        )

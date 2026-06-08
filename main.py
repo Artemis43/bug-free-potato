@@ -93,7 +93,4 @@ dp.register_message_handler(
 # ── Startup / shutdown hooks ───────────────────────────────────────────────
 from utils.webhook import on_startup, on_shutdown
 
-# ── Entry-point ────────────────────────────────────────────────────────────
-if __name__ == '__main__':
-    from aiogram import executor
-    executor.start_polling(dp, on_startup=on_startup, on_shutdown=on_shutdown)
+# ── Entry-point ──────────────────�
