@@ -447,6 +447,16 @@ async def _cb_pay_cancel(cq: types.CallbackQuery, bot, user_id: int) -> None:
     await handle_pay_callback(cq)
 
 
+async def _cb_stars_plan(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    from handlers.payment_stars import handle_stars_plan_callback
+    await handle_stars_plan_callback(cq)
+
+
+async def _cb_stars_cancel(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    from handlers.payment_stars import handle_stars_plan_callback
+    await handle_stars_plan_callback(cq)
+
+
 async def _cb_info_premium(cq: types.CallbackQuery, bot, user_id: int) -> None:
     await bot.answer_callback_query(cq.id)
     from handlers.payment import _get_plans, _fmt_inr
@@ -580,6 +590,8 @@ _CB_HANDLERS = {
     "bcast_cancel": _cb_broadcast_cancel,
     "pay_plan":     _cb_pay_plan,
     "pay_cancel":   _cb_pay_cancel,
+    "stars_plan":   _cb_stars_plan,
+    "stars_cancel": _cb_stars_cancel,
     "info_premium": _cb_info_premium,
     "info_verify":  _cb_info_verify,
     "close_info":   _cb_back_to_main,

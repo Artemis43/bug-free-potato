@@ -26,6 +26,7 @@ from handlers import (
     start, broadcast, caption, document,
     getlist, folder, download, setpremium,
     stop, about_help, sync, status, admin_tools, commands_ref, payment,
+    payment_stars,
 )
 
 # ── Command handlers ───────────────────────────────────────────────────────
@@ -68,6 +69,13 @@ dp.register_message_handler(
 dp.register_message_handler(
     start.reject_user,
     lambda msg: bool(msg.text) and msg.text.startswith('/reject_') and str(msg.from_user.id) in ADMIN_IDS
+)
+
+# Telegram Stars payment handlers
+dp.register_pre_checkout_query_handler(payment_stars.pre_checkout_handler)
+dp.register_message_handler(
+    payment_stars.successful_payment_handler,
+    content_types=[types.ContentType.SUCCESSFUL_PAYMENT],
 )
 
 # ── Callback query handler ─────────────────────────────────────────────────

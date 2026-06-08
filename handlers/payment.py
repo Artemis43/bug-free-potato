@@ -1,27 +1,15 @@
 """
 handlers/payment.py
 ────────────────────────────────────────────────────────────────────────────
-Razorpay payment integration for the Medical Content Bot.
+Payment routing for the Medical Content Bot.
 
-Flows
-─────
-1. Premium subscription  (/pay [plan])
-   User picks a plan → bot creates Razorpay Payment Link → sends to user
-   → user pays via UPI/card → Razorpay fires webhook → bot activates premium
+Active payment system is controlled by PAYMENT_MODE env var:
+  manual   — no automated payments; paid folders need admin approval
+  razorpay — Razorpay gateway (existing flow)
+  stars    — Telegram Stars (see handlers/payment_stars.py)
 
-2. Paid-folder one-time purchase  (/payfolder <folder_id>)
-   User taps a 💰 folder → bot creates Payment Link → user pays
-   → webhook → admin approval row inserted → user notified
-
-3. Admin configuration  (/payconfig ...)
-   Admin can list / set / add / remove pricing plans and paid-folder prices
-   directly from Telegram without restarting the bot.
-
-Database tables (auto-created in initialize_database)
-──────────────────────────────────────────────────────
-  payment_orders   — tracks every payment link created
-  payment_plans    — configurable premium plans (name, amount_paise, days)
-  payment_folder_prices — per-folder price overrides (folder_id → amount_paise)
+cmd_pay, cmd_payfolder, and cmd_payconfig all route based on PAYMENT_MODE.
+Razorpay-specific logic stays in this file; Stars logic is in payment_stars.py.
 """
 
 import hashlib
@@ -38,7 +26,7 @@ from aiogram.types import (
     ParseMode,
 )
 
-from config import ADMIN_IDS, ADMIN_CONTACT, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, ADMIN_GROUP_ID
+from config import ADMIN_IDS, ADMIN_CONTACT, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, ADMIN_GROUP_ID, PAYMENT_MODE
 from middlewares.authorization import is_private_chat
 from utils.database import db_execute, db_fetchall, db_fetchone
 from utils.helpers import esc
@@ -125,9 +113,22 @@ async def cmd_pay(message: types.Message):
     if not is_private_chat(message):
         return
 
+    # ── Route by payment mode ─────────────────────────────────────────────────
+    if PAYMENT_MODE == 'stars':
+        from handlers.payment_stars import cmd_pay_stars
+        await cmd_pay_stars(message)
+        return
+
+    if PAYMENT_MODE == 'manual':
+        await message.reply(
+            "💳 Online payments are not configured.\n"
+            f"Contact {ADMIN_CONTACT} to purchase premium manually."
+        )
+        return
+
+    # ── Razorpay mode ─────────────────────────────────────────────────────────
     user_id = message.from_user.id
 
-    # Check if Razorpay is configured
     if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
         await message.reply(
             "💳 Online payments are not yet configured.\n"
@@ -237,6 +238,20 @@ async def cmd_payfolder(message: types.Message):
     if not is_private_chat(message):
         return
 
+    # ── Route by payment mode ─────────────────────────────────────────────────
+    if PAYMENT_MODE == 'stars':
+        from handlers.payment_stars import cmd_payfolder_stars
+        await cmd_payfolder_stars(message)
+        return
+
+    if PAYMENT_MODE == 'manual':
+        await message.reply(
+            "💳 Online payments are not configured.\n"
+            f"Contact {ADMIN_CONTACT} to arrange access."
+        )
+        return
+
+    # ── Razorpay mode ─────────────────────────────────────────────────────────
     if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
         await message.reply(
             "💳 Online payments are not yet configured.\n"
@@ -551,13 +566,11 @@ def process_webhook_payload(payload: dict, razorpay_payment_id: str = ""):
 async def cmd_payconfig(message: types.Message):
     """Admin: /payconfig [subcommand] [args]
 
-    Subcommands:
-      list                         — list all plans
-      addplan <name> <₹amount> <days>  — add / update a plan
-      removeplan <name>            — deactivate a plan
-      setfolderprice <folder_id> <₹amount>  — set price for a specific folder
-      setdefault <₹amount>         — set default paid-folder price
-      status                       — show Razorpay connection status
+    Mode-aware — subcommands vary by PAYMENT_MODE.
+    Shared subcommands (all modes): setfolder, orders.
+    razorpay mode: list, addplan, removeplan, setfolderprice, setdefault, status.
+    stars mode:    list, addplan, removeplan, setfolderprice, setdefault, status.
+    manual mode:   setfolder, orders only (no pricing config needed).
     """
     if not is_private_chat(message):
         return
@@ -567,6 +580,37 @@ async def cmd_payconfig(message: types.Message):
 
     args = message.get_args().split()
     sub = args[0].lower() if args else "list"
+
+    # ── Stars mode: delegate to payment_stars ────────────────────────────────
+    if PAYMENT_MODE == 'stars':
+        from handlers.payment_stars import cmd_payconfig_stars
+        # Stars handler returns False for unknown subs (falls through to shared)
+        result = await cmd_payconfig_stars(message, args)
+        if result is not False:
+            return
+        # Fall through to shared subcommands (setfolder, orders)
+
+    # ── Manual mode: only allow shared subcommands ────────────────────────────
+    if PAYMENT_MODE == 'manual' and sub not in ('setfolder', 'orders', 'status'):
+        await message.reply(
+            "ℹ️ <b>Payment mode: Manual</b>\n\n"
+            "No payment gateway is configured.\n"
+            "Paid folders require admin approval via /approve or inline buttons.\n\n"
+            "Available commands:\n"
+            "  <code>/payconfig setfolder &lt;id&gt; free|premium|paid</code>\n"
+            "  <code>/payconfig orders [N]</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if PAYMENT_MODE == 'manual' and sub == 'status':
+        await message.reply(
+            "ℹ️ <b>Payment Mode: Manual</b>\n\n"
+            "No automated payment system active.\n"
+            "Paid folders need admin approval via inline buttons or /approve.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
 
     if sub == "list":
         plans = _get_plans()
@@ -794,7 +838,8 @@ async def cmd_payconfig(message: types.Message):
 
         rows = db_fetchall(
             '''
-            SELECT user_id, order_type, ref_id, amount_paise, status, created_at, paid_at
+            SELECT user_id, order_type, ref_id, amount_paise, status,
+                   payment_method, created_at, paid_at
             FROM payment_orders
             ORDER BY created_at DESC
             LIMIT %s
@@ -807,15 +852,16 @@ async def cmd_payconfig(message: types.Message):
             return
 
         lines = [f"<b>💳 Last {len(rows)} Payment Orders</b>\n"]
-        for uid, otype, ref_id, amount, status, created_at, paid_at in rows:
+        for uid, otype, ref_id, amount, status, method, created_at, paid_at in rows:
             status_icon = "✅" if status == "paid" else ("❌" if status == "failed" else "⏳")
             date_str = paid_at.strftime('%d %b %H:%M') if paid_at else (
                 created_at.strftime('%d %b %H:%M') if created_at else "—"
             )
+            method_tag = f" [{method}]" if method and method != "razorpay" else ""
             lines.append(
                 f"{status_icon} <code>{uid}</code> · {otype}"
                 f"{'#' + str(ref_id) if ref_id else ''}"
-                f" · {_fmt_inr(amount)} · {date_str}"
+                f" · {_fmt_inr(amount)} · {date_str}{method_tag}"
             )
 
         await message.reply('\n'.join(lines), parse_mode=ParseMode.HTML)
@@ -823,5 +869,8 @@ async def cmd_payconfig(message: types.Message):
     else:
         await message.reply(
             f"Unknown subcommand <code>{esc(sub)}</code>. Use <code>/payconfig list</code> to see options.",
+            parse_mode=ParseMode.HTML
+        )
+to see options.",
             parse_mode=ParseMode.HTML
         )

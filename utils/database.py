@@ -161,6 +161,33 @@ def initialize_database():
             )
             logging.info("Seeded default paid-folder price: ₹99.")
 
+        # ── Stars payment: plans ──────────────────────────────────────────────
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS stars_payment_plans (
+                id            SERIAL PRIMARY KEY,
+                name          TEXT    NOT NULL UNIQUE,
+                amount_stars  INTEGER NOT NULL,
+                days          INTEGER NOT NULL,
+                active        BOOLEAN DEFAULT TRUE
+            )
+        ''')
+
+        # ── Stars payment: per-folder price overrides ─────────────────────────
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS stars_folder_prices (
+                folder_id     INTEGER PRIMARY KEY REFERENCES folders(id) ON DELETE CASCADE,
+                amount_stars  INTEGER NOT NULL
+            )
+        ''')
+
+        # Seed default Stars folder price if absent
+        cur.execute("SELECT 1 FROM payment_config WHERE key = 'default_folder_price_stars'")
+        if not cur.fetchone():
+            cur.execute(
+                "INSERT INTO payment_config (key, value_int) VALUES ('default_folder_price_stars', 50)"
+            )
+            logging.info("Seeded default Stars folder price: 50 Stars.")
+
         # Seed a default caption row if the table is empty.
         # This ensures caption logic is always DB-driven — table is never empty.
         cur.execute('SELECT COUNT(*) FROM current_caption')
@@ -178,6 +205,7 @@ def initialize_database():
         _safe_alter(cur, 'users', 'current_upload_folder',   'TEXT')
         _safe_alter(cur, 'files', 'message_id',              'INTEGER')
         _safe_alter(cur, 'files', 'file_type',               "TEXT DEFAULT 'document'")
+        _safe_alter(cur, 'payment_orders', 'payment_method', "TEXT DEFAULT 'razorpay'")
 
         # ── Migration: replace TEXT upload-folder name with integer FK ────────
         _safe_alter(cur, 'users', 'current_upload_folder_id',

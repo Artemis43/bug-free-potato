@@ -36,7 +36,14 @@ PREMIUM_INFO_URL = os.environ.get('PREMIUM_INFO_URL', 'https://t.me/medcontentbo
 ADMIN_CONTACT = os.environ.get('ADMIN_CONTACT', '@Art3mis_adminbot')
 DEFAULT_CAPTION = os.environ.get('DEFAULT_CAPTION', '@Medical_Contentbot\nEver-growing archive of medical content')
 
-# ── Razorpay (optional — bot works without it; payments just won’t be available) ──
+# ── Payment mode ─────────────────────────────────────────────────────────────
+# Controls which payment system is active.
+#   manual   — no automated payments; paid folders require admin approval
+#   razorpay — Razorpay payment gateway (requires keys below)
+#   stars    — Telegram Stars (no external gateway, no KYC)
+PAYMENT_MODE = os.environ.get('PAYMENT_MODE', 'manual').lower()
+
+# ── Razorpay (only used when PAYMENT_MODE=razorpay) ──────────────────────────
 # Get keys from: https://dashboard.razorpay.com/app/keys
 RAZORPAY_KEY_ID     = os.environ.get('RAZORPAY_KEY_ID', '')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET', '')
@@ -51,18 +58,4 @@ LOG_LEVEL       = os.environ.get('LOG_LEVEL', 'INFO').upper()
 # Set to 0 to always notify (not recommended for busy bots).
 NOTIFY_COOLDOWN_HOURS = int(os.environ.get('NOTIFY_COOLDOWN_HOURS', '4'))
 
-# ── Startup validation ────────────────────────────────────────────────────────
-_REQUIRED = {
-    'API_TOKEN': API_TOKEN,
-    'ADMINS':    os.environ.get('ADMINS'),
-    'CHANNEL':   CHANNEL_ID,
-    'DB_STRING': POSTGRES_CONNECTION_STRING,
-    'HOST_URL':  os.environ.get('HOST_URL'),
-}
-
-_missing = [k for k, v in _REQUIRED.items() if not v]
-if _missing:
-    raise EnvironmentError(
-        f"\n\n[config] Missing required environment variables: {', '.join(_missing)}\n"
-        f"Copy .env.example → .env and fill in the values.\n"
-    )
+# ── Startup validation ─────────────�
