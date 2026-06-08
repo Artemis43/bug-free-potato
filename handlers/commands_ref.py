@@ -81,8 +81,8 @@ _USER_COMMANDS = """
     • 2 minutes between downloads
 
   💰 Paid folder (one-time):
-    • Runs at Premium speed
-    • Pay once, download once — access auto-approved after payment
+    • Billed at Premium speed
+    • 1 download per approval
 """
 
 _ADMIN_COMMANDS = """
@@ -146,7 +146,7 @@ _ADMIN_COMMANDS = """
   Multi-word names are supported — flags must come LAST.
   Flags (optional):
     <code>PREMIUM</code> — only premium users can download
-    <code>PAID</code>    — requires payment per user (one-time)
+    <code>PAID</code>    — requires admin approval per user (one-time)
   Examples:
   <code>/newfolder Anatomy</code>                             ← single word, free
   <code>/newfolder Human Anatomy</code>                      ← multi-word, free
@@ -171,15 +171,45 @@ _ADMIN_COMMANDS = """
   Example:  <code>/deletefolder Old Anatomy Notes</code>
 
 ▸ <code>/setfolder &lt;folder_id&gt; &lt;0 or 1&gt;</code>
-  Toggle a folder's premium flag only (0 = free, 1 = premium).
-  For full type control (free / premium / paid), use
-  <code>/payconfig setfolder</code> instead.
-  Example:  <code>/setfolder 5 1</code>  ← make folder #5 premium-only
+  Toggle a folder's premium flag (get the ID from /list).
+  <code>/setfolder 5 1</code>  ← make folder #5 premium-only
+  <code>/setfolder 5 0</code>  ← make folder #5 free
 
 ▸ <code>/list</code>
   Full inventory: all folders (with IDs and download counts),
   premium folders, paid folders, total users, pending users,
   and all premium users with expiry dates.
+"""
+
+_ADMIN_COMMANDS_2 = """
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+<b>📢 Broadcasting</b>
+
+▸ <code>/broadcast &lt;text&gt;</code>
+  Send a plain-text message to all approved users.
+  Example:  <code>/broadcast New content added — check /start!</code>
+
+▸ <code>/broadcast html &lt;html text&gt;</code>
+  Send an HTML-formatted broadcast.
+  Example:
+  <code>/broadcast html &lt;b&gt;New folder!&lt;/b&gt; Check /start 🎉</code>
+
+▸ <code>/broadcast md &lt;markdown text&gt;</code>
+  Send a Markdown-formatted broadcast.
+  Example:  <code>/broadcast md *Important* update!</code>
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+<b>💰 Paid Folder Approvals</b>
+
+▸ <code>/approve &lt;user_id&gt; &lt;folder_id&gt;</code>
+  Grant a user one download of a paid folder.
+  Example:  <code>/approve 7093051689 3</code>
+
+▸ <code>/reject &lt;user_id&gt; &lt;folder_id&gt;</code>
+  Decline a user's paid-folder request.
+  Example:  <code>/reject 7093051689 3</code>
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -198,7 +228,7 @@ _ADMIN_COMMANDS = """
   Example:  <code>/payconfig removeplan Basic</code>
 
 ▸ <code>/payconfig setfolder &lt;folder_id&gt; free|premium|paid</code>
-  Set a folder's access type:
+  Set a folder's full access type (replaces /setfolder for type changes):
     <code>free</code>    — anyone can download
     <code>premium</code> — Premium subscribers only
     <code>paid</code>    — one-time payment required per user
@@ -219,23 +249,6 @@ _ADMIN_COMMANDS = """
   Show the last N payment orders (default 10, max 50).
   Columns: user ID · type · amount · date.
   Example:  <code>/payconfig orders 20</code>
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-
-<b>📢 Broadcasting</b>
-
-▸ <code>/broadcast &lt;text&gt;</code>
-  Send a plain-text message to all approved users.
-  Example:  <code>/broadcast New content added — check /start!</code>
-
-▸ <code>/broadcast html &lt;html text&gt;</code>
-  Send an HTML-formatted broadcast.
-  Example:
-  <code>/broadcast html &lt;b&gt;New folder!&lt;/b&gt; Check /start 🎉</code>
-
-▸ <code>/broadcast md &lt;markdown text&gt;</code>
-  Send a Markdown-formatted broadcast.
-  Example:  <code>/broadcast md *Important* update!</code>
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -269,6 +282,7 @@ async def commands_reference(message: types.Message):
     # Send user section first
     await message.reply(_USER_COMMANDS.strip(), parse_mode=ParseMode.HTML)
 
-    # Send admin section only to admins
+    # Send admin section only to admins (split into two messages to stay under Telegram's 4096-char limit)
     if is_admin:
         await message.answer(_ADMIN_COMMANDS.strip(), parse_mode=ParseMode.HTML)
+        await message.answer(_ADMIN_COMMANDS_2.strip(), parse_mode=ParseMode.HTML)
