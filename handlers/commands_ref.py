@@ -283,4 +283,6 @@ async def commands_reference(message: types.Message):
     await message.reply(_USER_COMMANDS.strip(), parse_mode=ParseMode.HTML)
 
     # Send admin section only to admins (split into two messages to stay under Telegram's 4096-char limit)
-   
+    if is_admin:
+        await message.answer(_ADMIN_COMMANDS.strip(), parse_mode=ParseMode.HTML)
+        await message.answer(_ADMIN_COMMANDS_2.strip(), parse_mode=ParseMode.HTML)
