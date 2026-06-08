@@ -390,9 +390,8 @@ async def handle_pay_callback(callback_query: types.CallbackQuery):
 
 def verify_razorpay_signature(payload_bytes: bytes, signature: str, secret: str) -> bool:
     """Return True if the webhook signature is valid."""
-    from config import RAZORPAY_WEBHOOK_SECRET
     expected = hmac.new(
-        RAZORPAY_WEBHOOK_SECRET.encode(),
+        secret.encode(),
         payload_bytes,
         hashlib.sha256
     ).hexdigest()

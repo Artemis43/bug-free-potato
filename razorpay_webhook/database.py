@@ -15,8 +15,16 @@ log = logging.getLogger(__name__)
 
 
 def get_connection():
-    """Return a fresh psycopg2 connection. Callers must close it."""
-    return psycopg2.connect(DB_STRING)
+    """Return a fresh psycopg2 connection. Callers must close it.
+
+    If your DB_STRING points to a Supabase direct-connection host
+    (db.<project>.supabase.co port 5432) and the service is hosted on
+    Render.com, you may get "Network is unreachable" because Render's
+    network cannot reach Supabase's IPv6 address.  Switch DB_STRING to
+    the Supabase Session/Transaction pooler URL instead:
+        postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+    """
+    return psycopg2.connect(DB_STRING, connect_timeout=5)
 
 
 def db_execute(query: str, params=None) -> None:

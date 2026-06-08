@@ -198,6 +198,16 @@ async def process_callback(callback_query: types.CallbackQuery):
         except (ValueError, IndexError):
             page = 0
 
+        user_row = db_fetchone('SELECT status FROM users WHERE user_id = %s', (user_id,))
+        user_status = user_row[0] if user_row else 'pending'
+        if user_status != 'approved':
+            await bot.answer_callback_query(
+                callback_query.id,
+                "You are not yet approved. Please wait for admin approval.",
+                show_alert=True
+            )
+            return
+
         if not await is_user_member(user_id):
             await bot.answer_callback_query(callback_query.id, "Please join the required channels first.")
             return
@@ -580,12 +590,54 @@ async def process_callback(callback_query: types.CallbackQuery):
     # ── Info dialogs: back to main UI (from any in-place overlay) ────────────
     if data in ('close_info', 'back_to_main'):
         await bot.answer_callback_query(callback_query.id)
-        # Re-render the main folder UI in the same message
-        await send_ui(
-            user_id,
-            message_id=callback_query.message.message_id,
-            is_returning=True
-        )
+
+        user_row = db_fetchone('SELECT status, first_name FROM users WHERE user_id = %s', (user_id,))
+        user_status = user_row[0] if user_row else 'pending'
+        first_name  = user_row[1] if user_row else 'there'
+
+        if user_status == 'pending':
+            kb = InlineKeyboardMarkup()
+            kb.row(
+                InlineKeyboardButton("🎓 How to Verify", callback_data="info_verify"),
+                InlineKeyboardButton("💬 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"),
+            )
+            try:
+                await bot.edit_message_text(
+                    chat_id=callback_query.message.chat.id,
+                    message_id=callback_query.message.message_id,
+                    text=(
+                        f"Hello {esc(first_name or 'there')}! 👋\n\n"
+                        "<b>I'm The Medical Content Bot</b> ✨\n\n"
+                        "Access is limited to verified medical students to protect the content. 🙃\n\n"
+                        "Your request has been sent to an admin.\n"
+                        "Tap <b>How to Verify</b> below to see what to send them.\n\n"
+                        "You'll be notified here as soon as your request is reviewed! ✅"
+                    ),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=kb,
+                )
+            except Exception:
+                pass
+        elif user_status == 'rejected':
+            try:
+                await bot.edit_message_text(
+                    chat_id=callback_query.message.chat.id,
+                    message_id=callback_query.message.message_id,
+                    text=(
+                        f"Your access request was not approved. 😢\n\n"
+                        f"If you think this is a mistake, contact us: {ADMIN_CONTACT}"
+                    ),
+                    reply_markup=None,
+                )
+            except Exception:
+                pass
+        else:
+            # Approved — show the folder list
+            await send_ui(
+                user_id,
+                message_id=callback_query.message.message_id,
+                is_returning=True
+            )
         return
 
     # ── Unknown callback — just acknowledge ───────────────────────────────────

@@ -130,7 +130,9 @@ async def health():
         checks["database"] = "ok"
     except Exception as exc:
         log.error(f"[Health] DB check failed: {exc}")
-        checks["database"] = f"error: {exc}"
+        # Return only the first line to avoid leaking internal addresses/details
+        first_line = str(exc).split('\n')[0].strip()
+        checks["database"] = f"error: {first_line}"
 
     # ── Razorpay API check ────────────────────────────────────────────────────
     try:

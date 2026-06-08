@@ -5,7 +5,7 @@ from config import POSTGRES_CONNECTION_STRING, DEFAULT_CAPTION
 
 def get_connection():
     """Return a fresh psycopg2 connection. Per-call; callers must close."""
-    return psycopg2.connect(POSTGRES_CONNECTION_STRING)
+    return psycopg2.connect(POSTGRES_CONNECTION_STRING, connect_timeout=10)
 
 
 def initialize_database():
