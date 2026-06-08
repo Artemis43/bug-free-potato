@@ -2,7 +2,9 @@
 .env
 *.env
 .env.*
-!.env.example          # always keep the template committed
+# always keep the template committed
+!.env.example
+!**/.env.example
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
