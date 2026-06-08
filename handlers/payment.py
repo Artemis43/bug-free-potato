@@ -448,9 +448,8 @@ async def _activate_premium(user_id: int, plan_id: int, razorpay_payment_id: str
 
 
 async def _handle_folder_payment(user_id: int, folder_id: int, razorpay_payment_id: str):
-    """After payment for a paid folder: insert approval row & notify admin."""
+    """After payment for a paid folder: auto-approve access and notify user."""
     from main import bot
-    from utils.helpers import notify_admin_for_approval
 
     db_execute(
         "UPDATE payment_orders SET status = 'paid', paid_at = NOW(), razorpay_payment_id = %s "
@@ -461,27 +460,23 @@ async def _handle_folder_payment(user_id: int, folder_id: int, razorpay_payment_
     folder_row = db_fetchone("SELECT name FROM folders WHERE id = %s", (folder_id,))
     folder_name = folder_row[0] if folder_row else f"Folder #{folder_id}"
 
-    # Insert/reset approval row (not approved yet — admin must still confirm)
+    # Auto-approve immediately — payment is the authorization
     db_execute(
         '''
         INSERT INTO user_folder_approval (user_id, folder_id, approved, download_completed)
-        VALUES (%s, %s, FALSE, FALSE)
+        VALUES (%s, %s, TRUE, FALSE)
         ON CONFLICT (user_id, folder_id) DO UPDATE
-            SET approved = FALSE, download_completed = FALSE
+            SET approved = TRUE, download_completed = FALSE
         ''',
         (user_id, folder_id)
     )
 
-    # Notify admin with approve/reject buttons (same as manual flow)
-    await notify_admin_for_approval(user_id, folder_id, folder_name)
-
     try:
         await bot.send_message(
             user_id,
-            f"✅ <b>Payment received for {esc(folder_name)}!</b>\n\n"
-            f"An admin will approve your download shortly.\n"
-            f"You'll be notified here once it's ready.\n\n"
-            f"<i>This usually takes a few hours.</i>",
+            f"✅ <b>Access Granted: {esc(folder_name)}!</b>\n\n"
+            f"Your payment was received and access has been <b>activated automatically</b>.\n\n"
+            f"Use /start and tap the folder to begin your download.",
             parse_mode=ParseMode.HTML
         )
     except exceptions.BotBlocked:
@@ -583,6 +578,7 @@ async def cmd_payconfig(message: types.Message):
             "\n<b>Commands:</b>\n"
             "  <code>/payconfig addplan &lt;name&gt; &lt;amount&gt; &lt;days&gt;</code>\n"
             "  <code>/payconfig removeplan &lt;name&gt;</code>\n"
+            "  <code>/payconfig setfolder &lt;id&gt; free|premium|paid</code>\n"
             "  <code>/payconfig setfolderprice &lt;folder_id&gt; &lt;amount&gt;</code>\n"
             "  <code>/payconfig setdefault &lt;amount&gt;</code>\n"
             "  <code>/payconfig status</code>\n"
@@ -693,6 +689,51 @@ async def cmd_payconfig(message: types.Message):
         )
         await message.reply(
             f"✅ Default paid-folder price set to <b>{_fmt_inr(amount_paise)}</b>.",
+            parse_mode=ParseMode.HTML
+        )
+
+    elif sub == "setfolder":
+        # /payconfig setfolder <folder_id> free|premium|paid
+        if len(args) < 3:
+            await message.reply(
+                "Usage: <code>/payconfig setfolder &lt;folder_id&gt; &lt;free|premium|paid&gt;</code>\n\n"
+                "  <b>free</b>    — anyone can download\n"
+                "  <b>premium</b> — Premium subscribers only\n"
+                "  <b>paid</b>    — one-time purchase required",
+                parse_mode=ParseMode.HTML
+            )
+            return
+        try:
+            folder_id = int(args[1])
+        except ValueError:
+            await message.reply("Invalid folder ID.")
+            return
+        folder_type = args[2].lower()
+        if folder_type not in ("free", "premium", "paid"):
+            await message.reply(
+                "Folder type must be <code>free</code>, <code>premium</code>, or <code>paid</code>.",
+                parse_mode=ParseMode.HTML
+            )
+            return
+
+        folder_row = db_fetchone("SELECT name FROM folders WHERE id = %s", (folder_id,))
+        if not folder_row:
+            await message.reply(f"Folder ID {folder_id} not found.")
+            return
+
+        flag_map = {
+            "free":    (False, False),
+            "premium": (True,  False),
+            "paid":    (False, True),
+        }
+        prem, paid = flag_map[folder_type]
+        db_execute(
+            "UPDATE folders SET premium = %s, admin_approval = %s WHERE id = %s",
+            (prem, paid, folder_id)
+        )
+        label = {"free": "🔓 Free", "premium": "⭐ Premium", "paid": "💰 Paid"}[folder_type]
+        await message.reply(
+            f"✅ Folder <b>{esc(folder_row[0])}</b> (ID: {folder_id}) is now <b>{label}</b>.",
             parse_mode=ParseMode.HTML
         )
 

@@ -117,6 +117,20 @@ def insert_folder_approval(user_id: int, folder_id: int) -> None:
     )
 
 
+def approve_folder_access(user_id: int, folder_id: int) -> None:
+    """Grant folder access immediately — called after payment is confirmed."""
+    db_execute(
+        """
+        INSERT INTO user_folder_approval (user_id, folder_id, approved, download_completed)
+        VALUES (%s, %s, TRUE, FALSE)
+        ON CONFLICT (user_id, folder_id) DO UPDATE
+            SET approved           = TRUE,
+                download_completed = FALSE
+        """,
+        (user_id, folder_id),
+    )
+
+
 def get_plan(plan_id: int) -> tuple | None:
     """Return (name, amount_paise, days) for a plan, or None."""
     return db_fetchone(

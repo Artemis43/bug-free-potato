@@ -119,7 +119,7 @@ def _process_premium_payment(user_id: int, plan_id: int,
 
 def _process_folder_payment(user_id: int, folder_id: int,
                              razorpay_link_id: str, razorpay_payment_id: str) -> None:
-    """Record a paid-folder purchase and trigger admin approval request."""
+    """Record a paid-folder purchase and grant access automatically."""
 
     folder_name = db.get_folder_name(folder_id)
     user_info   = db.get_user_info(user_id)
@@ -127,15 +127,15 @@ def _process_folder_payment(user_id: int, folder_id: int,
     # 1. Mark order paid
     db.mark_order_paid(razorpay_link_id, razorpay_payment_id, user_id, "folder", folder_id)
 
-    # 2. Create / reset approval row (awaiting admin confirmation)
-    db.insert_folder_approval(user_id, folder_id)
+    # 2. Auto-approve access — payment is the authorization
+    db.approve_folder_access(user_id, folder_id)
 
     log.info(
-        f"[Webhook] Folder payment recorded | user={user_id} folder={folder_id} ({folder_name!r})"
+        f"[Webhook] Folder access granted | user={user_id} folder={folder_id} ({folder_name!r})"
     )
 
-    # 3. Notify admin
-    tg.notify_admin_folder_approval(user_id, folder_id, folder_name, user_info)
+    # 3. Notify admin (informational only — no action required)
+    tg.notify_admin_folder_purchased(user_id, folder_id, folder_name, user_info)
 
-    # 4. Notify user
-    tg.notify_user_folder_payment_received(user_id, folder_name)
+    # 4. Notify user that access is immediately available
+    tg.notify_user_folder_access_granted(user_id, folder_name)

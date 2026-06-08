@@ -79,42 +79,33 @@ def notify_user_premium_activated(user_id: int, plan_name: str,
     )
 
 
-def notify_user_folder_payment_received(user_id: int, folder_name: str) -> None:
-    """DM the user that their folder payment was received and is awaiting admin approval."""
+def notify_user_folder_access_granted(user_id: int, folder_name: str) -> None:
+    """DM the user that their paid-folder access has been activated automatically."""
     _send(
         user_id,
-        f"✅ <b>Payment received for {_esc(folder_name)}!</b>\n\n"
-        f"An admin will approve your download shortly.\n"
-        f"You'll be notified here once it's ready.\n\n"
-        f"<i>This usually takes a few hours.</i>",
+        f"✅ <b>Access Granted: {_esc(folder_name)}!</b>\n\n"
+        f"Your payment was received and access has been <b>activated automatically</b>.\n\n"
+        f"Use /start and tap the folder to begin your download.",
     )
 
 
-def notify_admin_folder_approval(user_id: int, folder_id: int,
-                                  folder_name: str, user_info: tuple | None) -> None:
-    """Send an approval request to the admin group/DM with inline approve/reject buttons."""
+def notify_admin_folder_purchased(user_id: int, folder_id: int,
+                                   folder_name: str, user_info: tuple | None) -> None:
+    """Inform the admin group/DM that a paid-folder was purchased (no action required)."""
     first_name = _esc(user_info[0] if user_info and user_info[0] else f"User {user_id}")
     username   = f"@{_esc(user_info[1])}" if user_info and user_info[1] else "no username"
 
     text = (
-        f"💰 <b>Paid-Folder Download Request</b> <i>(via Razorpay)</i>\n\n"
+        f"💰 <b>Paid-Folder Purchased</b> <i>(auto-approved)</i>\n\n"
         f"Name: {first_name}\n"
         f"Username: {username}\n"
         f"ID: <code>{user_id}</code>\n\n"
         f"Folder: <b>{_esc(folder_name)}</b> (ID: {folder_id})\n\n"
-        f"Tap a button below to approve or reject."
+        f"<i>Access was granted automatically. No action needed.</i>"
     )
-
-    # Inline keyboard with approve / reject callbacks (handled by the bot)
-    reply_markup = {
-        "inline_keyboard": [[
-            {"text": "✅ Approve", "callback_data": f"papprove:{user_id}:{folder_id}"},
-            {"text": "❌ Reject",  "callback_data": f"preject:{user_id}:{folder_id}"},
-        ]]
-    }
 
     target = _admin_target()
     if target:
-        _send(target, text, reply_markup=reply_markup)
+        _send(target, text)
     else:
-        log.error("[Telegram] No admin target configured — cannot send approval request.")
+        log.warning("[Telegram] No admin target configured — skipping purchase notification.")
