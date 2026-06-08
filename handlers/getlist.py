@@ -4,6 +4,7 @@ from aiogram.types import ParseMode
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS
 from utils.database import db_fetchall
+from utils.helpers import esc
 
 
 async def list_all(message: types.Message):
@@ -34,15 +35,15 @@ async def list_all(message: types.Message):
         lines.append("<b>📁 All Folders:</b>")
         if folders:
             for fid, fname, dl_count in folders:
-                lines.append(f"  • {fname} (ID: {fid}, ⬇️ {dl_count})")
+                lines.append(f"  • {esc(fname)} (ID: {fid}, ⬇️ {dl_count})")
         else:
             lines.append("  None")
 
         lines.append("\n<b>⭐ Premium Folders:</b>")
-        lines += [f"  • {f[1]} (ID: {f[0]})" for f in premium_folders] or ["  None"]
+        lines += [f"  • {esc(f[1])} (ID: {f[0]})" for f in premium_folders] or ["  None"]
 
         lines.append("\n<b>💰 Paid (Admin-Approval) Folders:</b>")
-        lines += [f"  • {f[1]} (ID: {f[0]})" for f in paid_folders] or ["  None"]
+        lines += [f"  • {esc(f[1])} (ID: {f[0]})" for f in paid_folders] or ["  None"]
 
         # ── Users ─────────────────────────────────────────────────────────────
         lines.append(f"\n<b>👥 Total Users: {len(all_users)}</b>")
@@ -51,15 +52,15 @@ async def list_all(message: types.Message):
         if pending_users:
             lines.append("\n<b>⏳ Pending Approval:</b>")
             for uid, uname, fname in pending_users:
-                name_str  = fname or "Unknown"
-                uname_str = f"@{uname}" if uname else "no username"
+                name_str  = esc(fname or "Unknown")
+                uname_str = f"@{esc(uname)}" if uname else "no username"
                 lines.append(f"  • {name_str} ({uname_str}) — ID: {uid}")
 
         lines.append("\n<b>🌟 Premium Users:</b>")
         if premium_users:
             for uid, uname, fname, exp in premium_users:
-                name_str  = fname or "Unknown"
-                uname_str = f"@{uname}" if uname else "no username"
+                name_str  = esc(fname or "Unknown")
+                uname_str = f"@{esc(uname)}" if uname else "no username"
                 exp_str   = exp.strftime('%d %b %Y') if exp else "N/A"
                 lines.append(f"  • {name_str} ({uname_str}) — expires {exp_str}")
         else:

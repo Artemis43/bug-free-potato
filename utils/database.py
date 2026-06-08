@@ -1,11 +1,34 @@
 import logging
 import psycopg2
+from psycopg2 import pool as _pg_pool
 from config import POSTGRES_CONNECTION_STRING, DEFAULT_CAPTION
+
+_pool: _pg_pool.ThreadedConnectionPool | None = None
+
+
+def _init_pool() -> None:
+    global _pool
+    _pool = _pg_pool.ThreadedConnectionPool(
+        minconn=2, maxconn=10,
+        dsn=POSTGRES_CONNECTION_STRING,
+        connect_timeout=10,
+    )
+    logging.info("Connection pool initialised (min=2 max=10).")
 
 
 def get_connection():
-    """Return a fresh psycopg2 connection. Per-call; callers must close."""
+    """Return a connection from the pool (or a direct connection before pool init)."""
+    if _pool is not None:
+        return _pool.getconn()
     return psycopg2.connect(POSTGRES_CONNECTION_STRING, connect_timeout=10)
+
+
+def _release(conn) -> None:
+    """Return connection to pool, or close it if pool not yet active."""
+    if _pool is not None:
+        _pool.putconn(conn)
+    else:
+        conn.close()
 
 
 def initialize_database():
@@ -156,6 +179,29 @@ def initialize_database():
         _safe_alter(cur, 'files', 'message_id',              'INTEGER')
         _safe_alter(cur, 'files', 'file_type',               "TEXT DEFAULT 'document'")
 
+        # ── Migration: replace TEXT upload-folder name with integer FK ────────
+        _safe_alter(cur, 'users', 'current_upload_folder_id',
+                    'INTEGER REFERENCES folders(id) ON DELETE SET NULL')
+        cur.execute("""
+            UPDATE users u
+            SET current_upload_folder_id = f.id
+            FROM folders f
+            WHERE f.name = u.current_upload_folder
+              AND u.current_upload_folder IS NOT NULL
+              AND u.current_upload_folder_id IS NULL
+        """)
+
+        # ── Indices for common query patterns ─────────────────────────────────
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_files_folder_id   ON files(folder_id)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_users_status       ON users(status)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_payment_orders_uid ON payment_orders(user_id)'
+        )
+
         conn.commit()
         logging.info("Database initialised successfully.")
     except Exception as e:
@@ -165,7 +211,10 @@ def initialize_database():
         raise
     finally:
         if conn:
-            conn.close()
+            conn.close()  # direct connection used during init — close normally
+
+    # Init pool after all schema work succeeds
+    _init_pool()
 
 
 def _safe_alter(cur, table: str, column: str, col_type: str):
@@ -191,7 +240,7 @@ def db_execute(query: str, params=None):
         conn.rollback()
         raise
     finally:
-        conn.close()
+        _release(conn)
 
 
 def db_fetchone(query: str, params=None):
@@ -201,7 +250,7 @@ def db_fetchone(query: str, params=None):
         cur.execute(query, params)
         return cur.fetchone()
     finally:
-        conn.close()
+        _release(conn)
 
 
 def db_fetchall(query: str, params=None):
@@ -211,7 +260,7 @@ def db_fetchall(query: str, params=None):
         cur.execute(query, params)
         return cur.fetchall()
     finally:
-        conn.close()
+        _release(conn)
 
 
 def add_user_to_db(user_id: int, username: str = None, first_name: str = None):

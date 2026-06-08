@@ -173,475 +173,434 @@ async def send_ui(chat_id: int, message_id: int = None,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Individual callback handlers (module-level for dict-dispatch)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _cb_page(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    try:
+        page = int(cq.data.split(':', 1)[1])
+    except (ValueError, IndexError):
+        page = 0
+
+    user_row = db_fetchone('SELECT status FROM users WHERE user_id = %s', (user_id,))
+    if (user_row[0] if user_row else 'pending') != 'approved':
+        await bot.answer_callback_query(
+            cq.id, "You are not yet approved. Please wait for admin approval.", show_alert=True
+        )
+        return
+
+    if not await is_user_member(user_id):
+        await bot.answer_callback_query(cq.id, "Please join the required channels first.")
+        return
+
+    await bot.answer_callback_query(cq.id)
+    await send_ui(user_id, cq.message.message_id, is_returning=True, page=page)
+
+
+async def _cb_download(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    try:
+        folder_id = int(cq.data.split(':', 1)[1])
+    except (ValueError, IndexError):
+        await bot.answer_callback_query(cq.id, "Invalid folder.")
+        return
+
+    from handlers.download import trigger_folder_download
+    asyncio.create_task(
+        trigger_folder_download(
+            user_id, folder_id,
+            cq.message.chat.id,
+            cq.id,
+            cq.message.message_id,
+        )
+    )
+
+
+async def _cb_approve(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    if str(user_id) not in ADMIN_IDS:
+        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        return
+    try:
+        target_id = int(cq.data.split(':', 1)[1])
+    except (ValueError, IndexError):
+        await bot.answer_callback_query(cq.id, "Invalid user ID.")
+        return
+
+    db_execute("UPDATE users SET status = 'approved' WHERE user_id = %s", (target_id,))
+    admin_name = esc(cq.from_user.first_name or str(user_id))
+    await bot.answer_callback_query(cq.id, f"✅ Approved user {target_id}")
+
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=cq.message.chat.id, message_id=cq.message.message_id, reply_markup=None
+        )
+        await bot.edit_message_text(
+            chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+            text=cq.message.text + f"\n\n✅ <b>Approved</b> by {admin_name}",
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception:
+        pass
+
+    try:
+        await bot.send_message(
+            target_id,
+            "🎉 <b>Access Granted!</b>\n\nYou've been approved to use the bot.\n\n👉 Tap /start to get started!",
+            parse_mode=ParseMode.HTML,
+        )
+    except exceptions.BotBlocked:
+        logging.warning(f"User {target_id} has blocked the bot.")
+    except Exception as e:
+        logging.error(f"Error notifying user {target_id} of approval: {e}")
+
+
+async def _cb_reject(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    if str(user_id) not in ADMIN_IDS:
+        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        return
+    try:
+        target_id = int(cq.data.split(':', 1)[1])
+    except (ValueError, IndexError):
+        await bot.answer_callback_query(cq.id, "Invalid user ID.")
+        return
+
+    db_execute("UPDATE users SET status = 'rejected' WHERE user_id = %s", (target_id,))
+    admin_name = esc(cq.from_user.first_name or str(user_id))
+    await bot.answer_callback_query(cq.id, f"❌ Rejected user {target_id}")
+
+    try:
+        await bot.edit_message_text(
+            chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+            text=cq.message.text + f"\n\n❌ <b>Rejected</b> by {admin_name}",
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception:
+        pass
+
+    try:
+        await bot.send_message(
+            target_id,
+            f"Your access request was not approved. 😢\n\nIf you think this is a mistake, contact us: {ADMIN_CONTACT}",
+        )
+    except exceptions.BotBlocked:
+        logging.warning(f"User {target_id} has blocked the bot.")
+    except Exception as e:
+        logging.error(f"Error notifying user {target_id} of rejection: {e}")
+
+
+async def _cb_folder_approve(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    if str(user_id) not in ADMIN_IDS:
+        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        return
+    try:
+        _, target_id, folder_id = cq.data.split(':', 2)
+        target_id, folder_id = int(target_id), int(folder_id)
+    except (ValueError, IndexError):
+        await bot.answer_callback_query(cq.id, "Invalid data.")
+        return
+
+    db_execute(
+        '''
+        INSERT INTO user_folder_approval (user_id, folder_id, approved, download_completed)
+        VALUES (%s, %s, TRUE, FALSE)
+        ON CONFLICT (user_id, folder_id) DO UPDATE
+            SET approved = TRUE, download_completed = FALSE
+        ''',
+        (target_id, folder_id)
+    )
+
+    folder_row = db_fetchone('SELECT name FROM folders WHERE id = %s', (folder_id,))
+    folder_name = folder_row[0] if folder_row else f"Folder #{folder_id}"
+    admin_name = esc(cq.from_user.first_name or str(user_id))
+    await bot.answer_callback_query(cq.id, f"✅ Approved download for user {target_id}")
+
+    try:
+        await bot.edit_message_text(
+            chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+            text=cq.message.text + f"\n\n✅ <b>Approved</b> by {admin_name}",
+            parse_mode=ParseMode.HTML, reply_markup=None,
+        )
+    except Exception:
+        pass
+
+    try:
+        await bot.send_message(
+            target_id,
+            f"✅ <b>Download Approved!</b>\n\n"
+            f"Your request for <b>{esc(folder_name)}</b> has been approved.\n"
+            f"You get <b>1 download</b> at Premium speed.\n\nUse /start and tap the folder to begin.",
+            parse_mode=ParseMode.HTML,
+        )
+    except exceptions.BotBlocked:
+        logging.warning(f"User {target_id} has blocked the bot.")
+    except Exception as e:
+        logging.error(f"Error notifying user {target_id} of paid-folder approval: {e}")
+
+
+async def _cb_folder_reject(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    if str(user_id) not in ADMIN_IDS:
+        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        return
+    try:
+        _, target_id, folder_id = cq.data.split(':', 2)
+        target_id, folder_id = int(target_id), int(folder_id)
+    except (ValueError, IndexError):
+        await bot.answer_callback_query(cq.id, "Invalid data.")
+        return
+
+    db_execute(
+        'DELETE FROM user_folder_approval WHERE user_id = %s AND folder_id = %s',
+        (target_id, folder_id)
+    )
+
+    folder_row = db_fetchone('SELECT name FROM folders WHERE id = %s', (folder_id,))
+    folder_name = folder_row[0] if folder_row else f"Folder #{folder_id}"
+    admin_name = esc(cq.from_user.first_name or str(user_id))
+    await bot.answer_callback_query(cq.id, f"❌ Rejected request for user {target_id}")
+
+    try:
+        await bot.edit_message_text(
+            chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+            text=cq.message.text + f"\n\n❌ <b>Rejected</b> by {admin_name}",
+            parse_mode=ParseMode.HTML, reply_markup=None,
+        )
+    except Exception:
+        pass
+
+    try:
+        await bot.send_message(
+            target_id,
+            f"❌ Your request for <b>{esc(folder_name)}</b> was not approved.\n\n"
+            f"If you think this is a mistake, contact us: {ADMIN_CONTACT}",
+            parse_mode=ParseMode.HTML,
+        )
+    except exceptions.BotBlocked:
+        logging.warning(f"User {target_id} has blocked the bot.")
+    except Exception as e:
+        logging.error(f"Error notifying user {target_id} of paid-folder rejection: {e}")
+
+
+async def _cb_delete_confirm(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    if str(user_id) not in ADMIN_IDS:
+        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        return
+
+    pending = _pending_deletions.pop(user_id, None)
+    if not pending:
+        await bot.answer_callback_query(cq.id)
+        await bot.edit_message_text(
+            "Session expired. Please use /deletefolder again.",
+            chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+        )
+        return
+
+    folder_name, folder_id = pending
+    from handlers.folder import execute_folder_deletion
+    await bot.answer_callback_query(cq.id, "🗑 Deleting…")
+    await execute_folder_deletion(bot, cq.message, folder_id, folder_name)
+
+
+async def _cb_delete_cancel(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    _pending_deletions.pop(user_id, None)
+    await bot.answer_callback_query(cq.id, "Cancelled.")
+    try:
+        await bot.edit_message_text(
+            "❌ Folder deletion cancelled.",
+            chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+        )
+    except Exception:
+        pass
+
+
+async def _cb_broadcast_send(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    if str(user_id) not in ADMIN_IDS:
+        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        return
+    try:
+        broadcast_id = int(cq.data.split(':', 1)[1])
+    except (ValueError, IndexError):
+        await bot.answer_callback_query(cq.id, "Invalid broadcast ID.")
+        return
+    from handlers.broadcast import execute_broadcast
+    asyncio.create_task(execute_broadcast(cq, broadcast_id))
+
+
+async def _cb_broadcast_cancel(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    if str(user_id) not in ADMIN_IDS:
+        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        return
+    try:
+        broadcast_id = int(cq.data.split(':', 1)[1])
+    except (ValueError, IndexError):
+        await bot.answer_callback_query(cq.id, "Invalid broadcast ID.")
+        return
+    from handlers.broadcast import cancel_broadcast
+    await cancel_broadcast(cq, broadcast_id)
+
+
+async def _cb_pay_plan(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    from handlers.payment import handle_pay_callback
+    await handle_pay_callback(cq)
+
+
+async def _cb_pay_cancel(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    from handlers.payment import handle_pay_callback
+    await handle_pay_callback(cq)
+
+
+async def _cb_info_premium(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    await bot.answer_callback_query(cq.id)
+    from handlers.payment import _get_plans, _fmt_inr
+    plans = _get_plans()
+
+    kb = InlineKeyboardMarkup(row_width=1)
+    if plans:
+        for plan_id, name, amount_paise, days in plans:
+            kb.add(InlineKeyboardButton(
+                f"💳 {name} — {_fmt_inr(amount_paise)} ({days} days)",
+                callback_data=f"pay_plan:{plan_id}",
+            ))
+    kb.row(InlineKeyboardButton("💬 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
+    kb.row(InlineKeyboardButton("◀ Back", callback_data="back_to_main"))
+
+    if plans:
+        plan_lines = "\n".join(
+            f"  • <b>{name}</b> — {_fmt_inr(amount_paise)} / {days} days"
+            for _, name, amount_paise, days in plans
+        )
+        how_to = "Tap a plan below to pay via UPI / Card / Net Banking."
+    else:
+        plan_lines = "  Contact admin for current pricing."
+        how_to = f"Message {ADMIN_CONTACT} to get your plan activated."
+
+    try:
+        await bot.edit_message_text(
+            chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+            text=(
+                "⭐ <b>Premium Membership</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "<b>What you get:</b>\n"
+                "  • ⚡ 5s interval between files  <i>(vs 60s free)</i>\n"
+                "  • ⏱ 2 min cooldown  <i>(vs 7 min free)</i>\n"
+                "  • ⭐ Access to all Premium-only folders\n\n"
+                f"<b>Plans:</b>\n{plan_lines}\n\n"
+                f"<b>How to subscribe:</b>\n  {how_to}\n\n"
+                "<i>Tap ◀ Back to return to the folder list.</i>"
+            ),
+            parse_mode=ParseMode.HTML, reply_markup=kb,
+        )
+    except Exception:
+        pass
+
+
+async def _cb_info_verify(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    await bot.answer_callback_query(cq.id)
+    kb = InlineKeyboardMarkup()
+    kb.row(InlineKeyboardButton("📨 Message Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
+    kb.row(InlineKeyboardButton("◀ Back", callback_data="back_to_main"))
+    try:
+        await bot.edit_message_text(
+            chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+            text=(
+                "🎓 <b>Student Verification</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "Access is limited to verified medical students\n"
+                "to protect our content from redistribution.\n\n"
+                "<b>How to verify:</b>\n"
+                "  1️⃣ Take a photo of your student ID or enrollment letter\n"
+                f"  2️⃣ Send it to: {ADMIN_CONTACT}\n"
+                "  3️⃣ Admin reviews and approves within a few hours\n\n"
+                "<b>Accepted documents:</b>\n"
+                "  • College / University student ID card\n"
+                "  • Enrollment certificate\n"
+                "  • Fee receipt with your name + course\n\n"
+                "<i>Once approved you'll get a notification here.\n"
+                "Tap ◀ Back to return.</i>"
+            ),
+            parse_mode=ParseMode.HTML, reply_markup=kb,
+        )
+    except Exception:
+        pass
+
+
+async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    await bot.answer_callback_query(cq.id)
+
+    user_row = db_fetchone('SELECT status, first_name FROM users WHERE user_id = %s', (user_id,))
+    user_status = user_row[0] if user_row else 'pending'
+    first_name  = user_row[1] if user_row else 'there'
+
+    if user_status == 'pending':
+        kb = InlineKeyboardMarkup()
+        kb.row(
+            InlineKeyboardButton("🎓 How to Verify", callback_data="info_verify"),
+            InlineKeyboardButton("💬 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"),
+        )
+        try:
+            await bot.edit_message_text(
+                chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+                text=(
+                    f"Hello {esc(first_name or 'there')}! 👋\n\n"
+                    "<b>I'm The Medical Content Bot</b> ✨\n\n"
+                    "Access is limited to verified medical students to protect the content. 🙃\n\n"
+                    "Your request has been sent to an admin.\n"
+                    "Tap <b>How to Verify</b> below to see what to send them.\n\n"
+                    "You'll be notified here as soon as your request is reviewed! ✅"
+                ),
+                parse_mode=ParseMode.HTML, reply_markup=kb,
+            )
+        except Exception:
+            pass
+    elif user_status == 'rejected':
+        try:
+            await bot.edit_message_text(
+                chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+                text=(
+                    f"Your access request was not approved. 😢\n\n"
+                    f"If you think this is a mistake, contact us: {ADMIN_CONTACT}"
+                ),
+                reply_markup=None,
+            )
+        except Exception:
+            pass
+    else:
+        await send_ui(user_id, message_id=cq.message.message_id, is_returning=True)
+
+
+# ── Dispatch table — split on ':' gives the key for both prefix and exact data
+_CB_HANDLERS = {
+    "pg":           _cb_page,
+    "dl":           _cb_download,
+    "approve":      _cb_approve,
+    "reject":       _cb_reject,
+    "papprove":     _cb_folder_approve,
+    "preject":      _cb_folder_reject,
+    "dfc":          _cb_delete_confirm,
+    "dfc_cancel":   _cb_delete_cancel,
+    "bcast_send":   _cb_broadcast_send,
+    "bcast_cancel": _cb_broadcast_cancel,
+    "pay_plan":     _cb_pay_plan,
+    "pay_cancel":   _cb_pay_cancel,
+    "info_premium": _cb_info_premium,
+    "info_verify":  _cb_info_verify,
+    "close_info":   _cb_back_to_main,
+    "back_to_main": _cb_back_to_main,
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Unified callback handler (ALL callbacks route through here)
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def process_callback(callback_query: types.CallbackQuery):
-    """Single entry point for every inline keyboard callback in the bot.
-
-    Dispatches on callback_data prefix:
-      pg:<n>          — folder list page navigation / refresh
-      dl:<folder_id>  — trigger folder download
-      approve:<uid>   — admin approves a pending user  (from admin group)
-      reject:<uid>    — admin rejects a pending user   (from admin group)
-      dfc:<folder_id> — confirm folder deletion
-      dfc_cancel      — cancel folder deletion
-    """
+    """Route every inline keyboard callback via _CB_HANDLERS dict-dispatch."""
     from main import bot
     user_id = callback_query.from_user.id
-    data    = callback_query.data or ''
-
-    # ── Page navigation / refresh ─────────────────────────────────────────────
-    if data.startswith('pg:'):
-        try:
-            page = int(data.split(':', 1)[1])
-        except (ValueError, IndexError):
-            page = 0
-
-        user_row = db_fetchone('SELECT status FROM users WHERE user_id = %s', (user_id,))
-        user_status = user_row[0] if user_row else 'pending'
-        if user_status != 'approved':
-            await bot.answer_callback_query(
-                callback_query.id,
-                "You are not yet approved. Please wait for admin approval.",
-                show_alert=True
-            )
-            return
-
-        if not await is_user_member(user_id):
-            await bot.answer_callback_query(callback_query.id, "Please join the required channels first.")
-            return
-
+    prefix  = (callback_query.data or '').split(':')[0]
+    handler = _CB_HANDLERS.get(prefix)
+    if handler:
+        await handler(callback_query, bot, user_id)
+    else:
         await bot.answer_callback_query(callback_query.id)
-        await send_ui(user_id, callback_query.message.message_id,
-                      is_returning=True, page=page)
-        return
-
-    # ── Folder download button ────────────────────────────────────────────────
-    if data.startswith('dl:'):
-        try:
-            folder_id = int(data.split(':', 1)[1])
-        except (ValueError, IndexError):
-            await bot.answer_callback_query(callback_query.id, "Invalid folder.")
-            return
-
-        from handlers.download import trigger_folder_download
-        asyncio.create_task(
-            trigger_folder_download(
-                user_id, folder_id,
-                callback_query.message.chat.id,
-                callback_query.id,
-                callback_query.message.message_id,
-            )
-        )
-        return
-
-    # ── Admin: approve pending user ───────────────────────────────────────────
-    if data.startswith('approve:'):
-        if str(user_id) not in ADMIN_IDS:
-            await bot.answer_callback_query(callback_query.id, "Not authorized.", show_alert=True)
-            return
-        try:
-            target_id = int(data.split(':', 1)[1])
-        except (ValueError, IndexError):
-            await bot.answer_callback_query(callback_query.id, "Invalid user ID.")
-            return
-
-        db_execute("UPDATE users SET status = 'approved' WHERE user_id = %s", (target_id,))
-        admin_name = esc(callback_query.from_user.first_name or str(user_id))
-        await bot.answer_callback_query(callback_query.id, f"✅ Approved user {target_id}")
-
-        # Update the group message
-        try:
-            await bot.edit_message_reply_markup(
-                chat_id=callback_query.message.chat.id,
-                message_id=callback_query.message.message_id,
-                reply_markup=None
-            )
-            await bot.edit_message_text(
-                chat_id=callback_query.message.chat.id,
-                message_id=callback_query.message.message_id,
-                text=callback_query.message.text + f"\n\n✅ <b>Approved</b> by {admin_name}",
-                parse_mode=ParseMode.HTML
-            )
-        except Exception:
-            pass
-
-        # Notify the user
-        try:
-            await bot.send_message(
-                target_id,
-                "🎉 <b>Access Granted!</b>\n\n"
-                "You've been approved to use the bot.\n\n"
-                "👉 Tap /start to get started!",
-                parse_mode=ParseMode.HTML
-            )
-        except exceptions.BotBlocked:
-            logging.warning(f"User {target_id} has blocked the bot.")
-        except Exception as e:
-            logging.error(f"Error notifying user {target_id} of approval: {e}")
-        return
-
-    # ── Admin: reject pending user ────────────────────────────────────────────
-    if data.startswith('reject:'):
-        if str(user_id) not in ADMIN_IDS:
-            await bot.answer_callback_query(callback_query.id, "Not authorized.", show_alert=True)
-            return
-        try:
-            target_id = int(data.split(':', 1)[1])
-        except (ValueError, IndexError):
-            await bot.answer_callback_query(callback_query.id, "Invalid user ID.")
-            return
-
-        db_execute("UPDATE users SET status = 'rejected' WHERE user_id = %s", (target_id,))
-        admin_name = esc(callback_query.from_user.first_name or str(user_id))
-        await bot.answer_callback_query(callback_query.id, f"❌ Rejected user {target_id}")
-
-        try:
-            await bot.edit_message_text(
-                chat_id=callback_query.message.chat.id,
-                message_id=callback_query.message.message_id,
-                text=callback_query.message.text + f"\n\n❌ <b>Rejected</b> by {admin_name}",
-                parse_mode=ParseMode.HTML
-            )
-        except Exception:
-            pass
-
-        try:
-            await bot.send_message(
-                target_id,
-                f"Your access request was not approved. 😢\n\n"
-                f"If you think this is a mistake, contact us: {ADMIN_CONTACT}"
-            )
-        except exceptions.BotBlocked:
-            logging.warning(f"User {target_id} has blocked the bot.")
-        except Exception as e:
-            logging.error(f"Error notifying user {target_id} of rejection: {e}")
-        return
-
-    # ── Admin: approve paid-folder request ───────────────────────────────────
-    if data.startswith('papprove:'):
-        if str(user_id) not in ADMIN_IDS:
-            await bot.answer_callback_query(callback_query.id, "Not authorized.", show_alert=True)
-            return
-        try:
-            _, target_id, folder_id = data.split(':', 2)
-            target_id, folder_id = int(target_id), int(folder_id)
-        except (ValueError, IndexError):
-            await bot.answer_callback_query(callback_query.id, "Invalid data.")
-            return
-
-        db_execute(
-            '''
-            INSERT INTO user_folder_approval (user_id, folder_id, approved, download_completed)
-            VALUES (%s, %s, TRUE, FALSE)
-            ON CONFLICT (user_id, folder_id) DO UPDATE
-                SET approved = TRUE, download_completed = FALSE
-            ''',
-            (target_id, folder_id)
-        )
-
-        # Fetch folder name for the user notification
-        folder_row = db_fetchone('SELECT name FROM folders WHERE id = %s', (folder_id,))
-        folder_name = folder_row[0] if folder_row else f"Folder #{folder_id}"
-
-        admin_name = esc(callback_query.from_user.first_name or str(user_id))
-        await bot.answer_callback_query(callback_query.id, f"✅ Approved download for user {target_id}")
-
-        # Update the group message
-        try:
-            await bot.edit_message_text(
-                chat_id=callback_query.message.chat.id,
-                message_id=callback_query.message.message_id,
-                text=callback_query.message.text + f"\n\n✅ <b>Approved</b> by {admin_name}",
-                parse_mode=ParseMode.HTML,
-                reply_markup=None
-            )
-        except Exception:
-            pass
-
-        # Notify the user
-        try:
-            await bot.send_message(
-                target_id,
-                f"✅ <b>Download Approved!</b>\n\n"
-                f"Your request for <b>{esc(folder_name)}</b> has been approved.\n"
-                f"You get <b>1 download</b> at Premium speed.\n\n"
-                f"Use /start and tap the folder to begin.",
-                parse_mode=ParseMode.HTML
-            )
-        except exceptions.BotBlocked:
-            logging.warning(f"User {target_id} has blocked the bot.")
-        except Exception as e:
-            logging.error(f"Error notifying user {target_id} of paid-folder approval: {e}")
-        return
-
-    # ── Admin: reject paid-folder request ────────────────────────────────────
-    if data.startswith('preject:'):
-        if str(user_id) not in ADMIN_IDS:
-            await bot.answer_callback_query(callback_query.id, "Not authorized.", show_alert=True)
-            return
-        try:
-            _, target_id, folder_id = data.split(':', 2)
-            target_id, folder_id = int(target_id), int(folder_id)
-        except (ValueError, IndexError):
-            await bot.answer_callback_query(callback_query.id, "Invalid data.")
-            return
-
-        db_execute(
-            'DELETE FROM user_folder_approval WHERE user_id = %s AND folder_id = %s',
-            (target_id, folder_id)
-        )
-
-        folder_row = db_fetchone('SELECT name FROM folders WHERE id = %s', (folder_id,))
-        folder_name = folder_row[0] if folder_row else f"Folder #{folder_id}"
-
-        admin_name = esc(callback_query.from_user.first_name or str(user_id))
-        await bot.answer_callback_query(callback_query.id, f"❌ Rejected request for user {target_id}")
-
-        try:
-            await bot.edit_message_text(
-                chat_id=callback_query.message.chat.id,
-                message_id=callback_query.message.message_id,
-                text=callback_query.message.text + f"\n\n❌ <b>Rejected</b> by {admin_name}",
-                parse_mode=ParseMode.HTML,
-                reply_markup=None
-            )
-        except Exception:
-            pass
-
-        try:
-            await bot.send_message(
-                target_id,
-                f"❌ Your request for <b>{esc(folder_name)}</b> was not approved.\n\n"
-                f"If you think this is a mistake, contact us: {ADMIN_CONTACT}",
-                parse_mode=ParseMode.HTML
-            )
-        except exceptions.BotBlocked:
-            logging.warning(f"User {target_id} has blocked the bot.")
-        except Exception as e:
-            logging.error(f"Error notifying user {target_id} of paid-folder rejection: {e}")
-        return
-
-    # ── Folder deletion: confirm ──────────────────────────────────────────────
-    if data.startswith('dfc:'):
-        if str(user_id) not in ADMIN_IDS:
-            await bot.answer_callback_query(callback_query.id, "Not authorized.", show_alert=True)
-            return
-
-        pending = _pending_deletions.pop(user_id, None)
-        if not pending:
-            await bot.answer_callback_query(callback_query.id)
-            await bot.edit_message_text(
-                "Session expired. Please use /deletefolder again.",
-                chat_id=callback_query.message.chat.id,
-                message_id=callback_query.message.message_id
-            )
-            return
-
-        folder_name, folder_id = pending
-        from handlers.folder import execute_folder_deletion
-        await bot.answer_callback_query(callback_query.id, "🗑 Deleting…")
-        await execute_folder_deletion(bot, callback_query.message, folder_id, folder_name)
-        return
-
-    # ── Folder deletion: cancel ───────────────────────────────────────────────
-    if data == 'dfc_cancel':
-        _pending_deletions.pop(user_id, None)
-        await bot.answer_callback_query(callback_query.id, "Cancelled.")
-        try:
-            await bot.edit_message_text(
-                "❌ Folder deletion cancelled.",
-                chat_id=callback_query.message.chat.id,
-                message_id=callback_query.message.message_id
-            )
-        except Exception:
-            pass
-        return
-
-    # ── Broadcast: send confirmed ─────────────────────────────────────────────
-    if data.startswith('bcast_send:'):
-        if str(user_id) not in ADMIN_IDS:
-            await bot.answer_callback_query(callback_query.id, "Not authorized.", show_alert=True)
-            return
-        try:
-            broadcast_id = int(data.split(':', 1)[1])
-        except (ValueError, IndexError):
-            await bot.answer_callback_query(callback_query.id, "Invalid broadcast ID.")
-            return
-        from handlers.broadcast import execute_broadcast
-        asyncio.create_task(execute_broadcast(callback_query, broadcast_id))
-        return
-
-    # ── Broadcast: cancel ─────────────────────────────────────────────────────
-    if data.startswith('bcast_cancel:'):
-        if str(user_id) not in ADMIN_IDS:
-            await bot.answer_callback_query(callback_query.id, "Not authorized.", show_alert=True)
-            return
-        try:
-            broadcast_id = int(data.split(':', 1)[1])
-        except (ValueError, IndexError):
-            await bot.answer_callback_query(callback_query.id, "Invalid broadcast ID.")
-            return
-        from handlers.broadcast import cancel_broadcast
-        await cancel_broadcast(callback_query, broadcast_id)
-        return
-
-    # ── Payment: plan picker & cancel ─────────────────────────────────────────
-    if data.startswith('pay_plan:') or data == 'pay_cancel':
-        from handlers.payment import handle_pay_callback
-        await handle_pay_callback(callback_query)
-        return
-
-    # ── Info dialogs: Premium info (in-place overlay / modal) ────────────────
-    if data == 'info_premium':
-        await bot.answer_callback_query(callback_query.id)
-        # Pull live plans from DB for the overlay
-        from handlers.payment import _get_plans, _fmt_inr
-        plans = _get_plans()
-
-        kb = InlineKeyboardMarkup(row_width=1)
-        if plans:
-            for plan_id, name, amount_paise, days in plans:
-                kb.add(InlineKeyboardButton(
-                    f"💳 {name} — {_fmt_inr(amount_paise)} ({days} days)",
-                    callback_data=f"pay_plan:{plan_id}"
-                ))
-        kb.row(
-            InlineKeyboardButton(
-                "💬 Contact Admin",
-                url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"
-            )
-        )
-        kb.row(InlineKeyboardButton("◀ Back", callback_data="back_to_main"))
-
-        # Build plan text
-        if plans:
-            plan_lines = "\n".join(
-                f"  • <b>{name}</b> — {_fmt_inr(amount_paise)} / {days} days"
-                for _, name, amount_paise, days in plans
-            )
-            how_to = "Tap a plan below to pay via UPI / Card / Net Banking."
-        else:
-            plan_lines = "  Contact admin for current pricing."
-            how_to = f"Message {ADMIN_CONTACT} to get your plan activated."
-
-        try:
-            await bot.edit_message_text(
-                chat_id=callback_query.message.chat.id,
-                message_id=callback_query.message.message_id,
-                text=(
-                    "⭐ <b>Premium Membership</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    "<b>What you get:</b>\n"
-                    "  • ⚡ 5s interval between files  <i>(vs 60s free)</i>\n"
-                    "  • ⏱ 2 min cooldown  <i>(vs 7 min free)</i>\n"
-                    "  • ⭐ Access to all Premium-only folders\n\n"
-                    f"<b>Plans:</b>\n{plan_lines}\n\n"
-                    f"<b>How to subscribe:</b>\n  {how_to}\n\n"
-                    "<i>Tap ◀ Back to return to the folder list.</i>"
-                ),
-                parse_mode=ParseMode.HTML,
-                reply_markup=kb
-            )
-        except Exception:
-            pass
-        return
-
-
-    # ── Info dialogs: Verification info (in-place overlay / modal) ───────────
-    if data == 'info_verify':
-        await bot.answer_callback_query(callback_query.id)
-        kb = InlineKeyboardMarkup()
-        kb.row(
-            InlineKeyboardButton(
-                "📨 Message Admin",
-                url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"
-            )
-        )
-        kb.row(InlineKeyboardButton("◀ Back", callback_data="back_to_main"))
-        try:
-            await bot.edit_message_text(
-                chat_id=callback_query.message.chat.id,
-                message_id=callback_query.message.message_id,
-                text=(
-                    "🎓 <b>Student Verification</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    "Access is limited to verified medical students\n"
-                    "to protect our content from redistribution.\n\n"
-                    "<b>How to verify:</b>\n"
-                    "  1️⃣ Take a photo of your student ID or enrollment letter\n"
-                    f"  2️⃣ Send it to: {ADMIN_CONTACT}\n"
-                    "  3️⃣ Admin reviews and approves within a few hours\n\n"
-                    "<b>Accepted documents:</b>\n"
-                    "  • College / University student ID card\n"
-                    "  • Enrollment certificate\n"
-                    "  • Fee receipt with your name + course\n\n"
-                    "<i>Once approved you'll get a notification here.\n"
-                    "Tap ◀ Back to return.</i>"
-                ),
-                parse_mode=ParseMode.HTML,
-                reply_markup=kb
-            )
-        except Exception:
-            pass
-        return
-
-    # ── Info dialogs: back to main UI (from any in-place overlay) ────────────
-    if data in ('close_info', 'back_to_main'):
-        await bot.answer_callback_query(callback_query.id)
-
-        user_row = db_fetchone('SELECT status, first_name FROM users WHERE user_id = %s', (user_id,))
-        user_status = user_row[0] if user_row else 'pending'
-        first_name  = user_row[1] if user_row else 'there'
-
-        if user_status == 'pending':
-            kb = InlineKeyboardMarkup()
-            kb.row(
-                InlineKeyboardButton("🎓 How to Verify", callback_data="info_verify"),
-                InlineKeyboardButton("💬 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"),
-            )
-            try:
-                await bot.edit_message_text(
-                    chat_id=callback_query.message.chat.id,
-                    message_id=callback_query.message.message_id,
-                    text=(
-                        f"Hello {esc(first_name or 'there')}! 👋\n\n"
-                        "<b>I'm The Medical Content Bot</b> ✨\n\n"
-                        "Access is limited to verified medical students to protect the content. 🙃\n\n"
-                        "Your request has been sent to an admin.\n"
-                        "Tap <b>How to Verify</b> below to see what to send them.\n\n"
-                        "You'll be notified here as soon as your request is reviewed! ✅"
-                    ),
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=kb,
-                )
-            except Exception:
-                pass
-        elif user_status == 'rejected':
-            try:
-                await bot.edit_message_text(
-                    chat_id=callback_query.message.chat.id,
-                    message_id=callback_query.message.message_id,
-                    text=(
-                        f"Your access request was not approved. 😢\n\n"
-                        f"If you think this is a mistake, contact us: {ADMIN_CONTACT}"
-                    ),
-                    reply_markup=None,
-                )
-            except Exception:
-                pass
-        else:
-            # Approved — show the folder list
-            await send_ui(
-                user_id,
-                message_id=callback_query.message.message_id,
-                is_returning=True
-            )
-        return
-
-    # ── Unknown callback — just acknowledge ───────────────────────────────────
-    await bot.answer_callback_query(callback_query.id)
 
 
 

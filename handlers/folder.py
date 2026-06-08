@@ -59,7 +59,9 @@ async def create_folder(message: types.Message):
         (folder_name, premium, admin_approval)
     )
 
-    set_current_upload_folder(message.from_user.id, folder_name)
+    new_folder = db_fetchone('SELECT id FROM folders WHERE name = %s', (folder_name,))
+    if new_folder:
+        set_current_upload_folder(message.from_user.id, new_folder[0])
 
     badges = []
     if premium:        badges.append("⭐ Premium")

@@ -109,3 +109,28 @@ def notify_admin_folder_purchased(user_id: int, folder_id: int,
         _send(target, text)
     else:
         log.warning("[Telegram] No admin target configured — skipping purchase notification.")
+
+
+def notify_admin_premium_activated(user_id: int, plan_name: str, days: int,
+                                    expiration_date: datetime,
+                                    user_info: tuple | None) -> None:
+    """Inform the admin group/DM that a user purchased premium (no action required)."""
+    first_name = _esc(user_info[0] if user_info and user_info[0] else f"User {user_id}")
+    username   = f"@{_esc(user_info[1])}" if user_info and user_info[1] else "no username"
+
+    text = (
+        f"💎 <b>Premium Purchased</b> <i>(via Razorpay)</i>\n\n"
+        f"Name: {first_name}\n"
+        f"Username: {username}\n"
+        f"ID: <code>{user_id}</code>\n\n"
+        f"Plan: <b>{_esc(plan_name)}</b>\n"
+        f"Duration: <b>{days} days</b>\n"
+        f"Expires: <b>{expiration_date.strftime('%d %b %Y')}</b>\n\n"
+        f"<i>Premium activated automatically. No action needed.</i>"
+    )
+
+    target = _admin_target()
+    if target:
+        _send(target, text)
+    else:
+        log.warning("[Telegram] No admin target configured — skipping premium notification.")

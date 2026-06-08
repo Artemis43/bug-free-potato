@@ -41,16 +41,19 @@ def razorpay_webhook():
     payload_bytes = request.get_data()
     signature     = request.headers.get('X-Razorpay-Signature', '')
 
-    # Verify signature if webhook secret is configured
-    if RAZORPAY_WEBHOOK_SECRET:
-        expected = hmac.new(
-            RAZORPAY_WEBHOOK_SECRET.encode(),
-            payload_bytes,
-            hashlib.sha256
-        ).hexdigest()
-        if not hmac.compare_digest(expected, signature):
-            logging.warning("[Razorpay Webhook] Invalid signature — rejected.")
-            return jsonify({"error": "invalid signature"}), 400
+    # Always verify signature — reject if secret is not configured
+    if not RAZORPAY_WEBHOOK_SECRET:
+        logging.warning("[Razorpay Webhook] No webhook secret configured — rejecting request.")
+        return jsonify({"error": "webhook secret not configured"}), 400
+
+    expected = hmac.new(
+        RAZORPAY_WEBHOOK_SECRET.encode(),
+        payload_bytes,
+        hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        logging.warning("[Razorpay Webhook] Invalid signature — rejected.")
+        return jsonify({"error": "invalid signature"}), 400
 
     try:
         import json

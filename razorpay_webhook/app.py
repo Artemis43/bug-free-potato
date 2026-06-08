@@ -59,7 +59,15 @@ async def lifespan(app: FastAPI):
     log.info("🚀 Razorpay Webhook Service starting…")
     log.info(f"   Mode: {config.ENV}")
     log.info(f"   Port: {config.PORT}")
-    log.info(f"   Signature verification: {'✅ enabled' if config.RAZORPAY_WEBHOOK_SECRET else '⚠️  DISABLED'}")
+    if config.RAZORPAY_WEBHOOK_SECRET:
+        log.info("   Signature verification: ✅ enabled")
+    else:
+        log.warning("   Signature verification: ⚠️ DISABLED — "
+                    "set RAZORPAY_WEBHOOK_SECRET to secure the endpoint")
+
+    import database as db
+    db.init_pool()
+
     yield
     log.info("Razorpay Webhook Service stopped.")
 
@@ -90,11 +98,11 @@ def _verify_signature(payload_bytes: bytes, signature: str) -> bool:
     """
     Validate Razorpay's HMAC-SHA256 webhook signature.
     Uses constant-time comparison to prevent timing attacks.
-    Returns True if valid (or if webhook secret is not configured — dev mode).
+    Rejects (returns False) if webhook secret is not configured.
     """
     if not config.RAZORPAY_WEBHOOK_SECRET:
-        log.warning("[Signature] Webhook secret not set — skipping verification (DEV MODE).")
-        return True
+        log.warning("[Signature] Webhook secret not configured — rejecting request.")
+        return False
 
     expected = hmac.new(
         config.RAZORPAY_WEBHOOK_SECRET.encode("utf-8"),

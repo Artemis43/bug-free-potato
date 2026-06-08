@@ -38,7 +38,7 @@ from aiogram.types import (
     ParseMode,
 )
 
-from config import ADMIN_IDS, ADMIN_CONTACT, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+from config import ADMIN_IDS, ADMIN_CONTACT, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, ADMIN_GROUP_ID
 from middlewares.authorization import is_private_chat
 from utils.database import db_execute, db_fetchall, db_fetchone
 from utils.helpers import esc
@@ -446,6 +446,28 @@ async def _activate_premium(user_id: int, plan_id: int, razorpay_payment_id: str
     except Exception as e:
         log.error(f"[Payment] Error notifying user {user_id}: {e}")
 
+    # Notify admin group (informational only)
+    user_row = db_fetchone("SELECT first_name, username FROM users WHERE user_id = %s", (user_id,))
+    first_name = esc(user_row[0] if user_row and user_row[0] else f"User {user_id}")
+    username   = f"@{esc(user_row[1])}" if user_row and user_row[1] else "no username"
+    admin_target = ADMIN_GROUP_ID if ADMIN_GROUP_ID else (ADMIN_IDS[0] if ADMIN_IDS else None)
+    if admin_target:
+        try:
+            await bot.send_message(
+                admin_target,
+                f"💎 <b>Premium Purchased</b> <i>(via Flask webhook)</i>\n\n"
+                f"Name: {first_name}\n"
+                f"Username: {username}\n"
+                f"ID: <code>{user_id}</code>\n\n"
+                f"Plan: <b>{esc(name)}</b>\n"
+                f"Duration: <b>{days} days</b>\n"
+                f"Expires: <b>{expiration_date.strftime('%d %b %Y')}</b>\n\n"
+                f"<i>Premium activated automatically. No action needed.</i>",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception as e:
+            log.warning(f"[Payment] Could not notify admin of premium purchase: {e}")
+
 
 async def _handle_folder_payment(user_id: int, folder_id: int, razorpay_payment_id: str):
     """After payment for a paid folder: auto-approve access and notify user."""
@@ -761,6 +783,42 @@ async def cmd_payconfig(message: types.Message):
                 f"❌ <b>Razorpay connection failed:</b>\n<code>{esc(str(e))}</code>",
                 parse_mode=ParseMode.HTML
             )
+
+    elif sub == "orders":
+        limit = 10
+        if len(args) > 1:
+            try:
+                limit = max(1, min(int(args[1]), 50))
+            except ValueError:
+                pass
+
+        rows = db_fetchall(
+            '''
+            SELECT user_id, order_type, ref_id, amount_paise, status, created_at, paid_at
+            FROM payment_orders
+            ORDER BY created_at DESC
+            LIMIT %s
+            ''',
+            (limit,)
+        ) or []
+
+        if not rows:
+            await message.reply("No payment orders found.")
+            return
+
+        lines = [f"<b>💳 Last {len(rows)} Payment Orders</b>\n"]
+        for uid, otype, ref_id, amount, status, created_at, paid_at in rows:
+            status_icon = "✅" if status == "paid" else ("❌" if status == "failed" else "⏳")
+            date_str = paid_at.strftime('%d %b %H:%M') if paid_at else (
+                created_at.strftime('%d %b %H:%M') if created_at else "—"
+            )
+            lines.append(
+                f"{status_icon} <code>{uid}</code> · {otype}"
+                f"{'#' + str(ref_id) if ref_id else ''}"
+                f" · {_fmt_inr(amount)} · {date_str}"
+            )
+
+        await message.reply('\n'.join(lines), parse_mode=ParseMode.HTML)
 
     else:
         await message.reply(

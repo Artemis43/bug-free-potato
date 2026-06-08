@@ -7,15 +7,29 @@ This service writes to the same PostgreSQL database as the bot.
 
 import logging
 import psycopg2
+from psycopg2 import pool as _pg_pool
 from psycopg2.extras import RealDictCursor
 
 from config import DB_STRING
 
 log = logging.getLogger(__name__)
 
+_pool: _pg_pool.ThreadedConnectionPool | None = None
+
+
+def init_pool() -> None:
+    """Initialise the connection pool — call once at application startup."""
+    global _pool
+    _pool = _pg_pool.ThreadedConnectionPool(
+        minconn=2, maxconn=10,
+        dsn=DB_STRING,
+        connect_timeout=5,
+    )
+    log.info("Webhook DB connection pool initialised (min=2 max=10).")
+
 
 def get_connection():
-    """Return a fresh psycopg2 connection. Callers must close it.
+    """Return a connection from the pool (or a direct connection before pool init).
 
     If your DB_STRING points to a Supabase direct-connection host
     (db.<project>.supabase.co port 5432) and the service is hosted on
@@ -24,7 +38,16 @@ def get_connection():
     the Supabase Session/Transaction pooler URL instead:
         postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
     """
+    if _pool is not None:
+        return _pool.getconn()
     return psycopg2.connect(DB_STRING, connect_timeout=5)
+
+
+def _release(conn) -> None:
+    if _pool is not None:
+        _pool.putconn(conn)
+    else:
+        conn.close()
 
 
 def db_execute(query: str, params=None) -> None:
@@ -41,7 +64,7 @@ def db_execute(query: str, params=None) -> None:
         raise
     finally:
         if conn:
-            conn.close()
+            _release(conn)
 
 
 def db_fetchone(query: str, params=None) -> tuple | None:
@@ -54,7 +77,7 @@ def db_fetchone(query: str, params=None) -> tuple | None:
         return cur.fetchone()
     finally:
         if conn:
-            conn.close()
+            _release(conn)
 
 
 def db_fetchall(query: str, params=None) -> list[tuple]:
@@ -67,7 +90,7 @@ def db_fetchall(query: str, params=None) -> list[tuple]:
         return cur.fetchall() or []
     finally:
         if conn:
-            conn.close()
+            _release(conn)
 
 
 def is_duplicate_payment(razorpay_payment_id: str) -> bool:

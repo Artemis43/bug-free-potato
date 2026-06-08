@@ -101,6 +101,7 @@ def _process_premium_payment(user_id: int, plan_id: int,
 
     plan_name, amount_paise, days = plan
     expiration_date = datetime.utcnow() + timedelta(days=days)
+    user_info = db.get_user_info(user_id)
 
     # 1. Mark order paid (idempotent UPDATE)
     db.mark_order_paid(razorpay_link_id, razorpay_payment_id, user_id, "premium", plan_id)
@@ -115,6 +116,9 @@ def _process_premium_payment(user_id: int, plan_id: int,
 
     # 3. Notify user via Telegram
     tg.notify_user_premium_activated(user_id, plan_name, days, expiration_date)
+
+    # 4. Notify admin (informational only — no action required)
+    tg.notify_admin_premium_activated(user_id, plan_name, days, expiration_date, user_info)
 
 
 def _process_folder_payment(user_id: int, folder_id: int,

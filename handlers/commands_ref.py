@@ -51,6 +51,25 @@ _USER_COMMANDS = """
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
+<b>💳 Payments</b>
+
+▸ <code>/pay</code>
+  Shows all available premium plans with prices and durations.
+  Tap a plan to get a payment link (UPI / Card / Net Banking).
+  Premium activates <b>automatically</b> after payment.
+
+▸ <code>/pay &lt;plan_name&gt;</code>
+  Skip the picker and go straight to a specific plan.
+  Example:  <code>/pay Basic</code>
+
+▸ <code>/payfolder &lt;folder_id&gt;</code>
+  Pay for one-time access to a specific paid (💰) folder.
+  Access is granted <b>automatically</b> after payment.
+  Get folder IDs from /start or /list.
+  Example:  <code>/payfolder 5</code>
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+
 <b>ℹ️ Cooldown Rules</b>
 
   🔓 Free user:
@@ -62,8 +81,8 @@ _USER_COMMANDS = """
     • 2 minutes between downloads
 
   💰 Paid folder (one-time):
-    • Billed at Premium speed
-    • 1 download per approval
+    • Runs at Premium speed
+    • Pay once, download once — access auto-approved after payment
 """
 
 _ADMIN_COMMANDS = """
@@ -127,7 +146,7 @@ _ADMIN_COMMANDS = """
   Multi-word names are supported — flags must come LAST.
   Flags (optional):
     <code>PREMIUM</code> — only premium users can download
-    <code>PAID</code>    — requires admin approval per user (one-time)
+    <code>PAID</code>    — requires payment per user (one-time)
   Examples:
   <code>/newfolder Anatomy</code>                             ← single word, free
   <code>/newfolder Human Anatomy</code>                      ← multi-word, free
@@ -152,14 +171,54 @@ _ADMIN_COMMANDS = """
   Example:  <code>/deletefolder Old Anatomy Notes</code>
 
 ▸ <code>/setfolder &lt;folder_id&gt; &lt;0 or 1&gt;</code>
-  Toggle a folder's premium flag (get the ID from /list).
-  <code>/setfolder 5 1</code>  ← make folder #5 premium-only
-  <code>/setfolder 5 0</code>  ← make folder #5 free
+  Toggle a folder's premium flag only (0 = free, 1 = premium).
+  For full type control (free / premium / paid), use
+  <code>/payconfig setfolder</code> instead.
+  Example:  <code>/setfolder 5 1</code>  ← make folder #5 premium-only
 
 ▸ <code>/list</code>
   Full inventory: all folders (with IDs and download counts),
   premium folders, paid folders, total users, pending users,
   and all premium users with expiry dates.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+<b>💳 Payment Configuration</b>
+
+▸ <code>/payconfig list</code>
+  Show all active premium plans, folder prices, and quick-reference
+  for all payconfig subcommands.
+
+▸ <code>/payconfig addplan &lt;name&gt; &lt;₹amount&gt; &lt;days&gt;</code>
+  Add or update a premium subscription plan.
+  Example:  <code>/payconfig addplan Basic 99 10</code>
+
+▸ <code>/payconfig removeplan &lt;name&gt;</code>
+  Deactivate a premium plan (hides it from users).
+  Example:  <code>/payconfig removeplan Basic</code>
+
+▸ <code>/payconfig setfolder &lt;folder_id&gt; free|premium|paid</code>
+  Set a folder's access type:
+    <code>free</code>    — anyone can download
+    <code>premium</code> — Premium subscribers only
+    <code>paid</code>    — one-time payment required per user
+  Example:  <code>/payconfig setfolder 5 paid</code>
+
+▸ <code>/payconfig setfolderprice &lt;folder_id&gt; &lt;₹amount&gt;</code>
+  Set a custom price for a specific paid folder.
+  Example:  <code>/payconfig setfolderprice 5 199</code>
+
+▸ <code>/payconfig setdefault &lt;₹amount&gt;</code>
+  Set the default price for paid folders that have no custom price.
+  Example:  <code>/payconfig setdefault 99</code>
+
+▸ <code>/payconfig status</code>
+  Test Razorpay connection and show key/mode/webhook secret status.
+
+▸ <code>/payconfig orders [N]</code>
+  Show the last N payment orders (default 10, max 50).
+  Columns: user ID · type · amount · date.
+  Example:  <code>/payconfig orders 20</code>
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -177,18 +236,6 @@ _ADMIN_COMMANDS = """
 ▸ <code>/broadcast md &lt;markdown text&gt;</code>
   Send a Markdown-formatted broadcast.
   Example:  <code>/broadcast md *Important* update!</code>
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-
-<b>💰 Paid Folder Approvals</b>
-
-▸ <code>/approve &lt;user_id&gt; &lt;folder_id&gt;</code>
-  Grant a user one download of a paid folder.
-  Example:  <code>/approve 7093051689 3</code>
-
-▸ <code>/reject &lt;user_id&gt; &lt;folder_id&gt;</code>
-  Decline a user's paid-folder request.
-  Example:  <code>/reject 7093051689 3</code>
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 

@@ -47,14 +47,11 @@ async def handle_upload(message: types.Message, file_type: str):
         file_name = f"photo_{user_id}_{message.message_id}"
 
     # ── Determine target folder ───────────────────────────────────────────
-    current_upload_folder = get_current_upload_folder(user_id)
-    folder_id = None
-    if current_upload_folder:
-        row = db_fetchone(
-            'SELECT id FROM folders WHERE name = %s', (current_upload_folder,)
-        )
-        if row:
-            folder_id = row[0]
+    folder_id = get_current_upload_folder(user_id)  # returns int | None directly
+    current_upload_folder = None
+    if folder_id:
+        row = db_fetchone('SELECT name FROM folders WHERE id = %s', (folder_id,))
+        current_upload_folder = row[0] if row else None
 
     # ── Build caption ─────────────────────────────────────────────────────
     caption_config = db_fetchone(

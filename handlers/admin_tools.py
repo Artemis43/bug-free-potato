@@ -25,7 +25,8 @@ async def pending_users(message: types.Message):
         await message.reply("✅ No pending approval requests.")
         return
 
-    lines = [f"<b>📋 Pending Approvals ({len(rows)})</b>\n"]
+    header = f"<b>📋 Pending Approvals ({len(rows)})</b>"
+    entries = []
 
     for user_id, username, first_name, last_notified in rows:
         name_str  = esc(first_name or "Unknown")
@@ -41,13 +42,29 @@ async def pending_users(message: types.Message):
         else:
             time_str = "unknown"
 
-        lines.append(
+        entries.append(
             f"• {name_str} ({uname_str})\n"
             f"  ID: <code>{user_id}</code> — requested {time_str}\n"
             f"  /approve_{user_id}  /reject_{user_id}"
         )
 
-    await message.reply('\n\n'.join(lines), parse_mode=ParseMode.HTML)
+    # Guard against Telegram's 4096-char limit
+    _LIMIT = 4000
+    body = '\n\n'.join(entries)
+    if len(header) + 1 + len(body) > _LIMIT:
+        # Find how many entries fit
+        shown = []
+        used = len(header) + 2  # header + "\n\n"
+        for i, entry in enumerate(entries):
+            if used + len(entry) + 2 > _LIMIT:
+                remaining = len(rows) - i
+                shown.append(f"<i>… and {remaining} more. Use /userinfo &lt;id&gt; for details.</i>")
+                break
+            shown.append(entry)
+            used += len(entry) + 2
+        body = '\n\n'.join(shown)
+
+    await message.reply(f"{header}\n\n{body}", parse_mode=ParseMode.HTML)
 
 
 async def set_upload_folder(message: types.Message):
@@ -75,7 +92,7 @@ async def set_upload_folder(message: types.Message):
         )
         return
 
-    set_current_upload_folder(message.from_user.id, folder_name)
+    set_current_upload_folder(message.from_user.id, row[0])
     await message.reply(
         f"✅ Upload folder set to <b>{esc(folder_name)}</b>.\n\nSend files now to add them.",
         parse_mode=ParseMode.HTML

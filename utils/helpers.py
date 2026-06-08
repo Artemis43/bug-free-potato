@@ -15,19 +15,20 @@ def esc(text) -> str:
 
 # ── Upload-folder state (persisted in DB per admin) ──────────────────────────
 
-def set_current_upload_folder(user_id: int, folder_name: str):
-    """Persist the admin's active upload folder to the DB."""
+def set_current_upload_folder(user_id: int, folder_id: int) -> None:
+    """Persist the admin's active upload folder (by ID) to the DB."""
     from utils.database import db_execute
     db_execute(
-        'UPDATE users SET current_upload_folder = %s WHERE user_id = %s',
-        (folder_name, user_id)
+        'UPDATE users SET current_upload_folder_id = %s WHERE user_id = %s',
+        (folder_id, user_id)
     )
 
-def get_current_upload_folder(user_id: int):
-    """Read the admin's active upload folder from the DB (None if not set)."""
+
+def get_current_upload_folder(user_id: int) -> int | None:
+    """Return the admin's active upload folder ID from the DB (None if not set)."""
     from utils.database import db_fetchone
     row = db_fetchone(
-        'SELECT current_upload_folder FROM users WHERE user_id = %s',
+        'SELECT current_upload_folder_id FROM users WHERE user_id = %s',
         (user_id,)
     )
     return row[0] if row else None
