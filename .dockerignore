@@ -1,0 +1,44 @@
+# Files / directories Docker should NOT copy into the image
+
+# Secrets — never bake credentials into an image
+.env
+*.env
+
+# Git history
+.git/
+.gitignore
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Local databases
+*.db
+*.sqlite
+
+# Logs
+*.log
+logs/
+
+# IDE / editor files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Documentation (not needed at runtime)
+README.md
+*.md
+
+# Tests
+tests/
+.pytest_cache/
+.coverage
+htmlcov/

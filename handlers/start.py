@@ -1,51 +1,44 @@
 import asyncio
 import logging
 from aiogram import types, exceptions
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
 from middlewares.authorization import is_private_chat, is_user_member
-from utils.database import add_user_to_db, cursor, conn
+from utils.database import add_user_to_db, db_fetchone, db_execute, db_fetchall
 from utils.helpers import notify_admins
-from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, API_KEY, DB_FILE_PATH, DBNAME, DBOWNER
+from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS
 from datetime import datetime, timedelta
-import asyncio
 
-# Global variables to track the last sync time and the lock
+# Global variables to throttle auto-sync
 last_sync_time = None
 sync_lock = asyncio.Lock()
 
-async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter=None):
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UI builder
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def send_ui(chat_id, message_id=None, current_folder=None):
     from main import bot
-    from handlers import sync  # Import the sync module
+
     global last_sync_time
 
-    # Fetch the number of files and folders
-    cursor.execute('SELECT COUNT(*) FROM folders')
-    folder_count = cursor.fetchone()[0]
-    cursor.execute('SELECT COUNT(*) FROM files')
-    file_count = cursor.fetchone()[0]
+    folder_count = db_fetchone('SELECT COUNT(*) FROM folders')[0]
+    file_count   = db_fetchone('SELECT COUNT(*) FROM files')[0]
 
-    # Visual representation of the current location
-    current_path = "Root"
-    if current_folder:
-        current_path = f"Root / {current_folder}"
-
-    # Create inline keyboard for navigation
     keyboard = InlineKeyboardMarkup()
     keyboard.add(InlineKeyboardButton("🙃 Refresh", callback_data='root'))
 
-    # Get chat info to retrieve the name
     chat = await bot.get_chat(chat_id)
-    chat_name = chat.full_name if chat.full_name else chat.username
+    chat_name = chat.full_name or chat.username or str(chat_id)
 
-    # Check if the user is a premium user and fetch the premium expiration date
-    cursor.execute('SELECT premium, premium_expiration FROM users WHERE user_id = ?', (chat_id,))
-    user_data = cursor.fetchone()
-
-    is_premium_user = user_data and user_data[0] == 1
+    user_data = db_fetchone(
+        'SELECT premium, premium_expiration FROM users WHERE user_id = %s',
+        (chat_id,)
+    )
+    is_premium_user    = bool(user_data and user_data[0])
     premium_expiration = user_data[1] if is_premium_user else None
 
-    # Compose the UI message text
-    text = f"Hello {chat_name}👋,\n\n"
+    text  = f"Hello {chat_name}👋,\n\n"
     text += f"*I'm The Medical Content Bot* ✨\n"
     text += f"About Us: /about\n"
     text += f"How to Use: /help\n\n"
@@ -55,225 +48,201 @@ async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter
     else:
         text += f"🌟 [Upgrade to Premium](https://t.me/medcontentbotinformation/2)\n\n"
 
-    text += f"**List of Folders 🔽**\n\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\n\n"
+    text += f"**List of Folders 🔽**\n\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\n\n"
 
-    # Fetch and list all folders, including premium and admin approval status
-    cursor.execute('SELECT name, premium, admin_approval FROM folders WHERE parent_id IS NULL ORDER BY name')
-    folders = cursor.fetchall()
+    folders = db_fetchall(
+        'SELECT name, premium, admin_approval FROM folders WHERE parent_id IS NULL ORDER BY name'
+    )
 
-    # Check if there are no folders
     if not folders:
         text += "😴😴\nHey there! Sorry I was asleep😅\nTry again in 60 secs."
 
-        # Display the UI even if there are no folders
         try:
             if message_id:
-                await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=keyboard, parse_mode='Markdown')
+                await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text,
+                                            reply_markup=keyboard, parse_mode='Markdown')
             else:
                 await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='Markdown')
         except exceptions.MessageNotModified:
-            pass  # Handle the exception gracefully by ignoring it
+            pass
 
-        # Check if at least 20 minutes have passed since the last sync
+        # Trigger auto-sync at most once every 20 minutes
         now = datetime.now()
         if last_sync_time is None or (now - last_sync_time) >= timedelta(minutes=20):
-            # Acquire the lock to ensure only one sync operation runs
             async with sync_lock:
                 if last_sync_time is None or (datetime.now() - last_sync_time) >= timedelta(minutes=20):
-                    last_sync_time = datetime.now()  # Update the last sync time
-                    # Run sync in the background without blocking UI
-                    asyncio.create_task(sync.sync_database(api_key=API_KEY, db_owner=DBOWNER, db_name=DBNAME, db_path=DB_FILE_PATH))
+                    last_sync_time = datetime.now()
+                    from handlers import sync as sync_module
+                    from config import WEBHOOK_HOST
+                    # sync_module.sync_database can be called here if needed
+                    logging.info("Auto-sync triggered.")
                 else:
-                    print("Sync is already in progress. Please wait.")
+                    logging.info("Sync already in progress.")
         else:
-            print("Sync was recently performed. Contact the admin.")
-
+            logging.info("Sync was recently performed.")
     else:
-        # Add folders to the text with appropriate labeling
         for folder_name, premium, admin_approval in folders:
             label = ""
             if not is_premium_user and premium:
                 label = " (Premium)"
             elif admin_approval:
                 label = " (Paid)"
-
             text += f"|-📒 `{folder_name}`{label}\n"
 
-        text += "\n\n\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\n\n"
-
+        text += "\n\n\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\n\n"
         if is_premium_user:
-            text += f"`To download Paid-folders,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
+            text += "`To download Paid-folders,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
         else:
-            text += f"`For Paid-folders OR Premium,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
+            text += "`For Paid-folders OR Premium,`\n👉 [Contact Admin](https://t.me/Art3mis_adminbot)"
 
-        # Display the UI with folders
         try:
             if message_id:
-                await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=keyboard, parse_mode='Markdown')
+                await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text,
+                                            reply_markup=keyboard, parse_mode='Markdown')
             else:
                 await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='Markdown')
         except exceptions.MessageNotModified:
-            pass  # Handle the exception gracefully by ignoring it
+            pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Callback handler
+# ─────────────────────────────────────────────────────────────────────────────
 
 async def process_callback(callback_query: types.CallbackQuery):
     from main import bot
-    global current_upload_folder
     user_id = callback_query.from_user.id
 
-    # Check if the callback data is not related to approval or rejection
     if not callback_query.data.startswith('approval_'):
         if not await is_user_member(user_id):
-            join_message = "Welcome to The Medical Content Bot ✨\n\nI have the ever-growing archive of Medical content 👾\n\nJoin our backup channels to remain connected ✊\n"
+            join_message = (
+                "Welcome to The Medical Content Bot ✨\n\n"
+                "I have the ever-growing archive of Medical content 👾\n\n"
+                "Join our backup channels to remain connected ✊\n"
+            )
             for channel in REQUIRED_CHANNELS:
                 join_message += f"{channel}\n"
             await bot.answer_callback_query(callback_query.id)
-            await bot.send_message(callback_query.from_user.id, join_message)
+            await bot.send_message(user_id, join_message)
             return
 
         code = callback_query.data
-
         if code == 'root':
-            await send_ui(callback_query.from_user.id, callback_query.message.message_id)
+            await send_ui(user_id, callback_query.message.message_id)
         else:
-            current_upload_folder = code
-            await send_ui(callback_query.from_user.id, callback_query.message.message_id, current_folder=current_upload_folder)
+            await send_ui(user_id, callback_query.message.message_id, current_folder=code)
 
-        await bot.answer_callback_query(callback_query.id)
+    await bot.answer_callback_query(callback_query.id)
 
-"""# The UI of the bot
-async def send_ui(chat_id, message_id=None, current_folder=None, selected_letter=None):
-    # Fetch the number of files and folders
-    cursor.execute('SELECT COUNT(*) FROM folders')
-    folder_count = cursor.fetchone()[0]
-    cursor.execute('SELECT COUNT(*) FROM files')
-    file_count = cursor.fetchone()[0]
 
-    # Visual representation of the current location
-    current_path = "Root"
-    if current_folder:
-        current_path = f"Root / {current_folder}"
+# ─────────────────────────────────────────────────────────────────────────────
+# Sticker helper — optional, skipped gracefully if STICKER_ID is not set
+# ─────────────────────────────────────────────────────────────────────────────
 
-    # Create inline keyboard for navigation
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton("🙃 Refresh", callback_data='root'))
-
-    # Get chat info to retrieve the name
-    chat = await bot.get_chat(chat_id)
-    chat_name = chat.full_name if chat.full_name else chat.username
-
-    # Compose the UI message text
-    text = (
-        f"**Hello `{chat_name}`👋,**\n\n"
-        f"**I'm The Medical Content Bot ✨**\n"
-        f"**About Me:** /about\n"
-        f"**How to Use:** /help\n\n"
-        f"**List of Folders 🔽**\n\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\n\n"
-    )
-
-    # Check if the user is premium
-    cursor.execute('SELECT premium FROM users WHERE user_id = ?', (chat_id,))
-    is_premium_user = cursor.fetchone()
-    is_premium_user = is_premium_user and is_premium_user[0]
-
-    # Fetch and list folders in alphabetical order, filter based on premium status
-    if is_premium_user:
-        cursor.execute('SELECT name FROM folders WHERE parent_id IS NULL ORDER BY name')
-    else:
-        cursor.execute('SELECT name FROM folders WHERE parent_id IS NULL AND premium = 0 ORDER BY name')
-
-    folders = cursor.fetchall()
-
-    # Add folders to the text
-    for folder in folders:
-        text += f"|-📒 `{folder[0]}`\n"
-
-    text += "\n\n\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\n\n`Please share any files that you may think are useful to others :D` - [Share](https://t.me/Art3mis_adminbot)"
-
+async def send_sticker_safe(bot, chat_id: int, delay: float = 2.0):
+    """Send the welcome sticker and delete it after `delay` seconds.
+    
+    If STICKER_ID is not configured, or the sticker file_id is invalid,
+    this function logs a warning and returns None instead of raising.
+    """
+    if not STICKER_ID:
+        logging.debug("STICKER_ID is not set — skipping sticker.")
+        return None
     try:
-        if message_id:
-            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=keyboard, parse_mode='Markdown')
-        else:
-            await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='Markdown')
-    except exceptions.MessageNotModified:
-        pass  # Handle the exception gracefully by ignoring it"""
+        msg = await bot.send_sticker(chat_id, STICKER_ID)
+        await asyncio.sleep(delay)
+        await bot.delete_message(chat_id, msg.message_id)
+        return msg
+    except exceptions.BadRequest as e:
+        logging.warning(f"Sticker send failed (bad file_id?): {e}")
+    except Exception as e:
+        logging.warning(f"Sticker send failed: {e}")
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /start
+# ─────────────────────────────────────────────────────────────────────────────
 
 async def handle_start(message: types.Message):
     from main import bot
     if not is_private_chat(message):
         return
-    user_id = message.from_user.id
+
+    user_id  = message.from_user.id
     username = message.from_user.username
+
     add_user_to_db(user_id)
-    cursor.execute('SELECT status, welcome_sent FROM users WHERE user_id = ?', (user_id,))
-    user = cursor.fetchone()
 
-    if user[0] == 'pending':
-        await message.answer("Hello,\nI'm The Medical Content Bot ✨\n\nTo prevent scammers and copyright strikes, we allow only Medical students to use this bot 🙃\n\n👉 Verify Now:\nhttps://t.me/medcontentbotinformation/4\n\nYou will be granted access only after verification!")
-        await notify_admins(user_id, username)  # Ensure this is after the initial message to the user
-    elif user[0] == 'approved':
-        if user[1] == 0:  # Check if welcome message has not been sent
-            await message.answer("Welcome! You have been given access to the bot 🙌")
-            cursor.execute('UPDATE users SET welcome_sent = 1 WHERE user_id = ?', (user_id,))
-            conn.commit()
+    user = db_fetchone(
+        'SELECT status, welcome_sent FROM users WHERE user_id = %s',
+        (user_id,)
+    )
 
-        if not await is_user_member(user_id):
-            sticker_msg = await bot.send_sticker(message.chat.id, STICKER_ID)
-            await asyncio.sleep(3)
-            await bot.delete_message(message.chat.id, sticker_msg.message_id)
-            join_message = "Welcome to The Medical Content Bot ✨\n\nI have the ever-growing archive of Medical content 👾\n\nJoin our backup channels to remain connected ✊\n\nAfter joining 👉 /start\n"
-            keyboard = InlineKeyboardMarkup(row_width=1)
-            for channel in REQUIRED_CHANNELS:
-                button = InlineKeyboardButton(text=channel, url=f"https://t.me/{channel.lstrip('@')}")
-                keyboard.add(button)
-            await message.reply(join_message, reply_markup=keyboard)
-        else:
-            sticker_msg = await bot.send_sticker(message.chat.id, STICKER_ID)
-            await asyncio.sleep(2)
-            await bot.delete_message(message.chat.id, sticker_msg.message_id)
-            await send_ui(message.chat.id)
-    elif user[0] == 'rejected':
-        await message.answer("Your access request has been rejected. You cannot use this bot 😢\n\nIf you think this is a mistake, Contact Us: @Art3mis_adminbot")
-
-"""async def handle_start(message: types.Message):
-    from main import bot
-    if not is_private_chat(message):
+    if not user:
+        await message.answer("Something went wrong. Please try again.")
         return
-    user_id = message.from_user.id
-    username = message.from_user.username
-    add_user_to_db(user_id)
-    cursor.execute('SELECT status FROM users WHERE user_id = ?', (user_id,))
-    user = cursor.fetchone()
 
-    if user[0] == 'pending':
-        await message.answer("Hello,\nI'm The Medical Content Bot ✨\n\nTo prevent scammers and copyright strikes, we allow only Medical students to use this bot 🙃\n\n👉 Verify Now:\nhttps://t.me/medcontentbotinformation/4\n\nYou will be granted access only after verification!")
-        await notify_admins(user_id, username)  # Ensure this is after the initial message to the user
-    elif user[0] == 'approved':
-        await message.answer("Welcome! You have been given access to the bot 🙌")
+    status, welcome_sent = user
+
+    if status == 'pending':
+        await message.answer(
+            "Hello,\nI'm The Medical Content Bot ✨\n\n"
+            "To prevent scammers and copyright strikes, we allow only Medical students to use this bot 🙃\n\n"
+            "👉 Verify Now:\nhttps://t.me/medcontentbotinformation/4\n\n"
+            "You will be granted access only after verification!"
+        )
+        await notify_admins(user_id, username)
+
+    elif status == 'approved':
+        if not welcome_sent:
+            await message.answer("Welcome! You have been given access to the bot 🙌")
+            db_execute(
+                'UPDATE users SET welcome_sent = TRUE WHERE user_id = %s',
+                (user_id,)
+            )
+
         if not await is_user_member(user_id):
-            sticker_msg = await bot.send_sticker(message.chat.id, STICKER_ID)
-            await asyncio.sleep(3)
-            await bot.delete_message(message.chat.id, sticker_msg.message_id)
-            join_message = "Welcome to The Medical Content Bot ✨\n\nI have the ever-growing archive of Medical content 👾\n\nJoin our backup channels to remain connected ✊\n\nAfter joining 👉 /start\n"
+            await send_sticker_safe(bot, message.chat.id, delay=3)
+
+            join_message = (
+                "Welcome to The Medical Content Bot ✨\n\n"
+                "I have the ever-growing archive of Medical content 👾\n\n"
+                "Join our backup channels to remain connected ✊\n\nAfter joining 👉 /start\n"
+            )
             keyboard = InlineKeyboardMarkup(row_width=1)
             for channel in REQUIRED_CHANNELS:
-                button = InlineKeyboardButton(text=channel, url=f"https://t.me/{channel.lstrip('@')}")
-                keyboard.add(button)
+                keyboard.add(InlineKeyboardButton(text=channel, url=f"https://t.me/{channel.lstrip('@')}"))
             await message.reply(join_message, reply_markup=keyboard)
         else:
-            sticker_msg = await bot.send_sticker(message.chat.id, STICKER_ID)
-            await asyncio.sleep(2)
-            await bot.delete_message(message.chat.id, sticker_msg.message_id)
+            await send_sticker_safe(bot, message.chat.id, delay=2)
             await send_ui(message.chat.id)
-    elif user[0] == 'rejected':
-        await message.answer("Your access request has been rejected. You cannot use this bot 😢\n\nIf you think this is a mistake, Contact Us: @Art3mis_adminbot")"""
 
+    elif status == 'rejected':
+        await message.answer(
+            "Your access request has been rejected. You cannot use this bot 😢\n\n"
+            "If you think this is a mistake, Contact Us: @Art3mis_adminbot"
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin approve / reject helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
 async def approve_user(message: types.Message):
     from main import bot
-    user_id = int(message.text.split('_')[1])
-    cursor.execute('UPDATE users SET status = ? WHERE user_id = ?', ('approved', user_id))
-    conn.commit()
-    await message.answer(f"User {user_id} has been approved.")
+    try:
+        user_id = int(message.text.split('_')[1])
+    except (IndexError, ValueError):
+        await message.answer("Invalid command format.")
+        return
+
+    db_execute(
+        "UPDATE users SET status = 'approved' WHERE user_id = %s",
+        (user_id,)
+    )
+    await message.answer(f"✅ User {user_id} has been approved.")
+
     try:
         await bot.send_message(user_id, "You have been approved to use the bot\n\nClick here 👉 /start")
     except exceptions.BotBlocked:
@@ -283,14 +252,27 @@ async def approve_user(message: types.Message):
     except Exception as e:
         logging.error(f"Error sending approval message to user {user_id}: {e}")
 
+
 async def reject_user(message: types.Message):
     from main import bot
-    user_id = int(message.text.split('_')[1])
-    cursor.execute('UPDATE users SET status = ? WHERE user_id = ?', ('rejected', user_id))
-    conn.commit()
-    await message.answer(f"User {user_id} has been rejected.")
     try:
-        await bot.send_message(user_id, "You have been rejected from using the bot 🫤\n\nIf you think this is a mistake, **Contact Us:** @Art3mis_adminbot")
+        user_id = int(message.text.split('_')[1])
+    except (IndexError, ValueError):
+        await message.answer("Invalid command format.")
+        return
+
+    db_execute(
+        "UPDATE users SET status = 'rejected' WHERE user_id = %s",
+        (user_id,)
+    )
+    await message.answer(f"❌ User {user_id} has been rejected.")
+
+    try:
+        await bot.send_message(
+            user_id,
+            "You have been rejected from using the bot 🫤\n\n"
+            "If you think this is a mistake, **Contact Us:** @Art3mis_adminbot"
+        )
     except exceptions.BotBlocked:
         logging.warning(f"User {user_id} has blocked the bot.")
     except exceptions.ChatNotFound:

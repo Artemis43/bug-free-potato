@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  bot:
+    build: .
+    container_name: medbot
+    restart: unless-stopped
+
+    # Load all env vars from your local .env file.
+    # In CI/CD, pass them as secrets instead.
+    env_file:
+      - .env
+
+    ports:
+      # Flask keep-alive / health-check server
+      - "${KEEP_ALIVE_PORT:-4343}:4343"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4343/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    # Persist logs across container restarts
+    volumes:
+      - bot_logs:/medbot/logs
+
+    # Limit resource usage so a single bad download doesn't starve the host
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+volumes:
+  bot_logs:

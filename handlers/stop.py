@@ -1,37 +1,38 @@
 import logging
-import sys
 from aiogram import types
+from aiogram.types import ParseMode
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS
-from utils.database import cursor, conn
-from handlers.sync import FLAG_FILE_PATH
-import os
+from utils.database import db_fetchone
+
 
 async def stop(message: types.Message):
+    """Admin-only command: /stop — gracefully shut down the bot process."""
     from main import bot
-    
-    # Prevent the restart logic when stopping the bot manually
-    if os.path.exists(FLAG_FILE_PATH):
-        os.remove(FLAG_FILE_PATH)
-
     if not is_private_chat(message):
         return
+
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.reply("You are not authorized to stop the bot.")
         return
 
-    await message.reply("Bot is stopping...")
+    user_id = message.from_user.id
 
-    conn.commit()
+    # Verify the admin exists in the database before stopping
+    result = db_fetchone('SELECT 1 FROM users WHERE user_id = %s', (user_id,))
 
-    # Path to the database file
-    db_file_path = 'file_management.db'
-    
+    if not result:
+        await message.reply("You need to /start the bot first.")
+        return
+
+    await message.reply("🛑 Bot is stopping…")
+    logging.warning(f"Bot stopped by admin {user_id}.")
+
+    # Delete the webhook so Telegram doesn't try to reach us while we're down
     try:
-        await bot.send_document(message.chat.id, types.InputFile(db_file_path))
+        await bot.delete_webhook()
     except Exception as e:
-        logging.error(f"Error sending backup file: {e}")
-        await message.reply("Error sending backup file. Please try again later.")
+        logging.error(f"Error deleting webhook during stop: {e}")
 
-    # Ensure the bot exits gracefully and does not trigger a restart
-    sys.exit("Bot stopped by admin command.")
+    import sys
+    sys.exit(0)

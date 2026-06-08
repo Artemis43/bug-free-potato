@@ -1,89 +1,179 @@
-import sqlite3
-from config import DB_FILE_PATH, ADMIN_IDS
+import logging
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from config import POSTGRES_CONNECTION_STRING
 
-# Connect to the SQLite database
-conn = sqlite3.connect(DB_FILE_PATH)
-cursor = conn.cursor()
+# ---------------------------------------------------------------------------
+# Connection helpers
+# ---------------------------------------------------------------------------
 
-# Table to manage folders
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS folders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    parent_id INTEGER,
-    premium INTEGER DEFAULT 0,  -- Indicates if the folder is premium
-    download_count INTEGER DEFAULT 0,  -- Tracks the number of downloads
-    admin_approval INTEGER DEFAULT 0,  -- Indicates if admin approval is required
-    FOREIGN KEY (parent_id) REFERENCES folders (id)
-)
-''')
+def get_connection():
+    """Return a fresh psycopg2 connection.
 
-# Table to manage files
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_id TEXT NOT NULL,
-    file_name TEXT NOT NULL,
-    folder_id INTEGER,
-    message_id INTEGER,
-    caption TEXT,  -- Custom caption for the file
-    file_type TEXT NOT NULL,  -- Type of the file: 'document', 'video', or 'photo'
-    FOREIGN KEY (folder_id) REFERENCES folders (id)
-)
-''')
-conn.commit()
+    Using a per-call connection is the simplest safe pattern for an async bot
+    running on a single process.  For high-throughput bots, swap this out for
+    a connection pool (e.g. psycopg2.pool.ThreadedConnectionPool).
+    """
+    return psycopg2.connect(POSTGRES_CONNECTION_STRING)
 
-# Table to manage users
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    premium_expiration DATETIME,  -- Expiration date of premium status
-    approved INTEGER DEFAULT 0,  -- Indicates if the user is approved
-    status TEXT DEFAULT 'pending',  -- User status ('pending', 'approved', etc.)
-    premium INTEGER DEFAULT 0,  -- Indicates if the user is a premium member
-    last_download DATETIME,  -- Timestamp of the last download
-    welcome_sent INTEGER DEFAULT 0  -- Tracks if the welcome message was sent (0 = not sent, 1 = sent)
-)
-''')
-conn.commit()
 
-# Table to store the current caption settings
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS current_caption (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    caption_type TEXT NOT NULL,  -- 'custom' or 'append'
-    custom_text TEXT  -- The custom text to be used in the caption
-)
-''')
-conn.commit()
+# ---------------------------------------------------------------------------
+# Schema initialisation
+# ---------------------------------------------------------------------------
 
-# Table to store user-folder approval status
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS user_folder_approval (
-    user_id INTEGER,
-    folder_id INTEGER,
-    approved INTEGER DEFAULT 0,  -- 0 = not approved, 1 = approved
-    download_completed INTEGER DEFAULT 0,  -- 0 = not downloaded, 1 = downloaded
-    PRIMARY KEY (user_id, folder_id)
-)
-''')
-conn.commit()
+def initialize_database():
+    """Create all tables if they do not already exist."""
+    conn = get_connection()
+    cursor = conn.cursor()
 
-# Table to store global bot states
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS bot_state (
-    key TEXT PRIMARY KEY,  -- The name of the state (e.g., 'awaiting_new_db_upload')
-    value INTEGER  -- The value of the state (e.g., 0 or 1)
-)
-''')
-conn.commit()
+    try:
+        # Table to manage folders
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS folders (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            parent_id INTEGER,
+            premium BOOLEAN DEFAULT FALSE,
+            download_count INTEGER DEFAULT 0,
+            admin_approval BOOLEAN DEFAULT FALSE,
+            FOREIGN KEY (parent_id) REFERENCES folders (id)
+        )
+        ''')
 
-# Adds new users to the database
-def add_user_to_db(user_id):
-    cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
-    user = cursor.fetchone()
-    
-    if not user:
-        status = 'approved' if str(user_id) in ADMIN_IDS else 'pending'
-        cursor.execute('INSERT INTO users (user_id, status) VALUES (?, ?)', (user_id, status))
+        # Table to manage files
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS files (
+            id SERIAL PRIMARY KEY,
+            file_id TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            folder_id INTEGER,
+            message_id INTEGER,
+            caption TEXT,
+            file_type TEXT NOT NULL,
+            FOREIGN KEY (folder_id) REFERENCES folders (id)
+        )
+        ''')
+
+        # Table to manage users
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            premium_expiration TIMESTAMPTZ,
+            approved BOOLEAN DEFAULT FALSE,
+            status TEXT DEFAULT 'pending',
+            premium BOOLEAN DEFAULT FALSE,
+            last_download TIMESTAMPTZ,
+            welcome_sent BOOLEAN DEFAULT FALSE
+        )
+        ''')
+
+        # Table to store the current caption settings
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS current_caption (
+            id SERIAL PRIMARY KEY,
+            caption_type TEXT NOT NULL,
+            custom_text TEXT
+        )
+        ''')
+
+        # Table to store user-folder approval status
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_folder_approval (
+            user_id BIGINT,
+            folder_id INTEGER,
+            approved BOOLEAN DEFAULT FALSE,
+            download_completed BOOLEAN DEFAULT FALSE,
+            PRIMARY KEY (user_id, folder_id),
+            FOREIGN KEY (folder_id) REFERENCES folders (id),
+            FOREIGN KEY (user_id) REFERENCES users (user_id)
+        )
+        ''')
+
+        # Table to store global bot states
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bot_state (
+            key TEXT PRIMARY KEY,
+            value INTEGER
+        )
+        ''')
+
         conn.commit()
+        logging.info("Database initialised successfully.")
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error initialising database: {e}")
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# User helpers
+# ---------------------------------------------------------------------------
+
+def add_user_to_db(user_id: int):
+    """Insert a user if they do not already exist (idempotent)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            '''
+            INSERT INTO users (user_id, status, welcome_sent)
+            VALUES (%s, 'pending', FALSE)
+            ON CONFLICT (user_id) DO NOTHING
+            ''',
+            (user_id,)
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Error adding user {user_id} to DB: {e}")
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Generic query helpers  (thin wrappers – keep handlers simple)
+# ---------------------------------------------------------------------------
+
+def db_fetchone(query: str, params: tuple = ()):
+    """Execute a SELECT and return the first row, or None."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(query, params)
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def db_fetchall(query: str, params: tuple = ()):
+    """Execute a SELECT and return all rows."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(query, params)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def db_execute(query: str, params: tuple = ()):
+    """Execute a DML statement (INSERT/UPDATE/DELETE) and commit."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(query, params)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"DB execute error: {e}")
+        raise
+    finally:
+        cursor.close()
+        conn.close()

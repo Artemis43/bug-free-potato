@@ -1,17 +1,17 @@
 from aiogram import types, exceptions
 from middlewares.authorization import is_private_chat, is_user_member
 from config import ADMIN_IDS, REQUIRED_CHANNELS, CHANNEL_ID
-from utils.database import cursor, conn
+from utils.database import db_fetchone, db_fetchall, db_execute
 from utils.helpers import set_current_upload_folder
+import logging
+
 
 async def create_folder(message: types.Message):
     if not is_private_chat(message):
         return
     user_id = message.from_user.id
 
-    cursor.execute('SELECT status FROM users WHERE user_id = ?', (user_id,))
-    user = cursor.fetchone()
-
+    user = db_fetchone('SELECT status FROM users WHERE user_id = %s', (user_id,))
     if not user or user[0] != 'approved':
         await message.reply("You are not authorized to create folders. Please wait for admin approval.")
         return
@@ -21,82 +21,94 @@ async def create_folder(message: types.Message):
         for channel in REQUIRED_CHANNELS:
             join_message += f"{channel}\n"
         await message.reply(join_message)
-    else:
-        if str(user_id) not in ADMIN_IDS:
-            await message.reply("You are not authorized to create folders.")
-            return
+        return
 
-        args = message.get_args().split(' ', 2)
-        folder_name = args[0]
-        premium = 0  # Default to non-premium
-        admin_approval = 0  # Default to no admin approval required
+    if str(user_id) not in ADMIN_IDS:
+        await message.reply("You are not authorized to create folders.")
+        return
 
-        if len(args) > 1 and args[1].strip().upper() == 'PREMIUM':
-            premium = 1
-        if len(args) > 2 and args[2].strip().upper() == 'PAID':
-            admin_approval = 1
+    args = message.get_args().split(' ', 2)
+    folder_name = args[0].strip()
 
-        if not folder_name:
-            await message.reply("Please specify a folder name.")
-            return
+    if not folder_name:
+        await message.reply("Please specify a folder name.")
+        return
 
-        cursor.execute('INSERT INTO folders (name, premium, admin_approval) VALUES (?, ?, ?)', (folder_name, premium, admin_approval))
-        conn.commit()
+    # Check for duplicate folder name
+    existing = db_fetchone('SELECT id FROM folders WHERE name = %s', (folder_name,))
+    if existing:
+        await message.reply(f"A folder named '{folder_name}' already exists.")
+        return
 
-        set_current_upload_folder(user_id, folder_name)
+    premium        = args[1].strip().upper() == 'PREMIUM' if len(args) > 1 else False
+    admin_approval = args[2].strip().upper() == 'PAID'    if len(args) > 2 else False
 
-        await message.reply(f"Folder '{folder_name}' created {'as a PREMIUM folder' if premium else ''}{' with admin approval required' if admin_approval else ''} and set as the current upload folder.")
+    db_execute(
+        'INSERT INTO folders (name, premium, admin_approval) VALUES (%s, %s, %s)',
+        (folder_name, premium, admin_approval)
+    )
+
+    set_current_upload_folder(user_id, folder_name)
+
+    flags = []
+    if premium:
+        flags.append("PREMIUM")
+    if admin_approval:
+        flags.append("PAID/Admin-Approval")
+    flag_str = f" [{', '.join(flags)}]" if flags else ""
+
+    await message.reply(
+        f"✅ Folder '{folder_name}'{flag_str} created and set as your active upload folder."
+    )
+
 
 async def rename_folder(message: types.Message):
     if not is_private_chat(message):
         return
     user_id = message.from_user.id
-    
-    cursor.execute('SELECT status FROM users WHERE user_id = ?', (user_id,))
-    user = cursor.fetchone()
 
+    user = db_fetchone('SELECT status FROM users WHERE user_id = %s', (user_id,))
     if not user or user[0] != 'approved':
         await message.reply("You are not authorized to rename folders. Please wait for admin approval.")
         return
-    
+
     if not await is_user_member(user_id):
-        join_message = "Welcome to The Medical Content Bot ✨\n\nI have the ever-growing archive of Medical content 👾\n\nJoin our backup channels to remain connected ✊\n"
+        join_message = "Welcome to The Medical Content Bot ✨\n\nJoin our backup channels to remain connected ✊\n"
         for channel in REQUIRED_CHANNELS:
             join_message += f"{channel}\n"
         await message.reply(join_message)
-    else:
-        if str(message.from_user.id) not in ADMIN_IDS:
-            await message.reply("You are not authorized to rename folders.")
-            return
+        return
 
-        args = message.get_args().split(',')
-        if len(args) != 2:
-            await message.reply("Please specify the current folder name and the new folder name in the format: /renamefolder <current_name>,<new_name>")
-            return
+    if str(user_id) not in ADMIN_IDS:
+        await message.reply("You are not authorized to rename folders.")
+        return
 
-        current_name, new_name = args
+    args = message.get_args().split(',')
+    if len(args) != 2:
+        await message.reply(
+            "Please specify: `/renamefolder <current_name>,<new_name>`",
+            parse_mode='Markdown'
+        )
+        return
 
-        # Check if the folder with the current name exists
-        cursor.execute('SELECT id FROM folders WHERE name = ?', (current_name,))
-        folder_id = cursor.fetchone()
+    current_name = args[0].strip()
+    new_name     = args[1].strip()
 
-        if not folder_id:
-            await message.reply("Folder not found.")
-            return
+    if not current_name or not new_name:
+        await message.reply("Folder names cannot be empty.")
+        return
 
-        # Check if the new folder name already exists
-        cursor.execute('SELECT id FROM folders WHERE name = ?', (new_name,))
-        existing_folder = cursor.fetchone()
+    folder_row = db_fetchone('SELECT id FROM folders WHERE name = %s', (current_name,))
+    if not folder_row:
+        await message.reply(f"Folder '{current_name}' not found.")
+        return
 
-        if existing_folder:
-            await message.reply(f"A folder with the name '{new_name}' already exists. Please choose a different name.")
-            return
+    if db_fetchone('SELECT id FROM folders WHERE name = %s', (new_name,)):
+        await message.reply(f"A folder named '{new_name}' already exists.")
+        return
 
-        # Update the folder name in the database
-        cursor.execute('UPDATE folders SET name = ? WHERE id = ?', (new_name, folder_id[0]))
-        conn.commit()
-        
-        await message.reply(f"Folder '{current_name}' has been renamed to '{new_name}'.")
+    db_execute('UPDATE folders SET name = %s WHERE id = %s', (new_name, folder_row[0]))
+    await message.reply(f"✅ Folder '{current_name}' renamed to '{new_name}'.")
 
 
 async def delete_folder(message: types.Message):
@@ -105,54 +117,53 @@ async def delete_folder(message: types.Message):
         return
     user_id = message.from_user.id
 
-    cursor.execute('SELECT status FROM users WHERE user_id = ?', (user_id,))
-    user = cursor.fetchone()
-
+    user = db_fetchone('SELECT status FROM users WHERE user_id = %s', (user_id,))
     if not user or user[0] != 'approved':
         await message.reply("You are not authorized to delete folders. Please wait for admin approval.")
         return
-    
+
     if not await is_user_member(user_id):
-        join_message = "Welcome to The Medical Content Bot ✨\n\nI have the ever-growing archive of Medical content 👾\n\nJoin our backup channels to remain connected ✊\n"
+        join_message = "Welcome to The Medical Content Bot ✨\n\nJoin our backup channels to remain connected ✊\n"
         for channel in REQUIRED_CHANNELS:
             join_message += f"{channel}\n"
         await message.reply(join_message)
         return
 
-    if str(message.from_user.id) not in ADMIN_IDS:
+    if str(user_id) not in ADMIN_IDS:
         await message.reply("You are not authorized to delete folders.")
         return
 
-    folder_name = message.get_args()
+    folder_name = message.get_args().strip()
     if not folder_name:
         await message.reply("Please specify a folder name.")
         return
 
-    # Get the folder ID to be deleted
-    cursor.execute('SELECT id FROM folders WHERE name = ?', (folder_name,))
-    folder_id = cursor.fetchone()
-
-    if not folder_id:
+    folder_row = db_fetchone('SELECT id FROM folders WHERE name = %s', (folder_name,))
+    if not folder_row:
         await message.reply("Folder not found.")
         return
 
-    folder_id = folder_id[0]
+    folder_id = folder_row[0]
 
-    # Get the message IDs of the files in the folder
-    cursor.execute('SELECT message_id FROM files WHERE folder_id = ?', (folder_id,))
-    message_ids = cursor.fetchall()
+    # ── Delete channel messages for all files in this folder ──────────────
+    message_ids = db_fetchall('SELECT message_id FROM files WHERE folder_id = %s', (folder_id,))
 
-    # Delete the files from the channel and the database
-    for message_id in message_ids:
+    deleted_count = 0
+    for (msg_id,) in message_ids:
+        if msg_id is None:
+            continue
         try:
-            await bot.delete_message(CHANNEL_ID, message_id[0])
+            await bot.delete_message(CHANNEL_ID, msg_id)
+            deleted_count += 1
         except exceptions.MessageToDeleteNotFound:
-            continue  # Skip if the message is not found
+            pass
+        except Exception as e:
+            logging.error(f"Error deleting channel message {msg_id}: {e}")
 
-    cursor.execute('DELETE FROM files WHERE folder_id = ?', (folder_id,))
+    db_execute('DELETE FROM files WHERE folder_id = %s', (folder_id,))
+    db_execute('DELETE FROM folders WHERE id = %s', (folder_id,))
 
-    # Delete the folder from the database
-    cursor.execute('DELETE FROM folders WHERE id = ?', (folder_id,))
-    conn.commit()
-
-    await message.reply(f"Folder '{folder_name}' and its contents deleted.")
+    await message.reply(
+        f"✅ Folder '{folder_name}' deleted "
+        f"({deleted_count}/{len(message_ids)} channel messages removed)."
+    )

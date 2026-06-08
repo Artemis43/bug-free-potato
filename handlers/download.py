@@ -7,16 +7,20 @@ from aiogram.types import ParseMode
 from aiogram.utils.exceptions import MessageNotModified
 from utils.helpers import notify_admin_for_approval, notify_admin_for_approval_again
 from middlewares.authorization import is_private_chat, is_user_member
-from utils.database import cursor, conn
+from utils.database import db_fetchone, db_fetchall, db_execute
+
 
 async def get_all_files(message: types.Message):
     from main import bot
     if not is_private_chat(message):
         return
+
     user_id = message.from_user.id
 
-    cursor.execute('SELECT status, premium, last_download FROM users WHERE user_id = ?', (user_id,))
-    user_info = cursor.fetchone()
+    user_info = db_fetchone(
+        'SELECT status, premium, last_download FROM users WHERE user_id = %s',
+        (user_id,)
+    )
 
     if not user_info or user_info[0] != 'approved':
         await message.reply("You are not authorized to download content. Please wait for admin approval.")
@@ -24,7 +28,19 @@ async def get_all_files(message: types.Message):
 
     user_status, is_premium, last_download = user_info
 
-    # Check if the user is a member of the required channels
+    # ── Enforce cooldown based on last download time ──────────────────────
+    if last_download:
+        cooldown = timedelta(minutes=2) if is_premium else timedelta(minutes=7)
+        elapsed = datetime.now() - last_download.replace(tzinfo=None)
+        if elapsed < cooldown:
+            remaining = int((cooldown - elapsed).total_seconds() / 60) + 1
+            await message.reply(
+                f"⏳ Please wait *{remaining} more minute(s)* before your next download.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+    # ── Force-sub check ───────────────────────────────────────────────────
     if not await is_user_member(user_id):
         join_message = "Welcome to The Medical Content Bot ✨\n\nJoin our backup channels to remain connected ✊\n"
         for channel in REQUIRED_CHANNELS:
@@ -37,9 +53,10 @@ async def get_all_files(message: types.Message):
         await message.reply("Please specify a folder name.")
         return
 
-    # Get the folder ID, premium status, and admin approval requirement
-    cursor.execute('SELECT id, premium, admin_approval FROM folders WHERE name = ?', (folder_name,))
-    folder_info = cursor.fetchone()
+    folder_info = db_fetchone(
+        'SELECT id, premium, admin_approval FROM folders WHERE name = %s',
+        (folder_name,)
+    )
 
     if not folder_info:
         await message.reply("Folder not found.")
@@ -47,59 +64,64 @@ async def get_all_files(message: types.Message):
 
     folder_id, is_premium_folder, requires_admin_approval = folder_info
 
-    # Check if the folder is premium and if the user is allowed to access it
+    # ── Premium-folder gate ───────────────────────────────────────────────
     if is_premium_folder and not is_premium:
         await message.reply("This folder is for premium users only. Please upgrade to access it.")
         return
 
-    # If the folder requires admin approval, apply the approval logic
+    # ── Admin-approval gate ───────────────────────────────────────────────
     if requires_admin_approval:
-        cursor.execute('''
-        SELECT approved, download_completed FROM user_folder_approval 
-        WHERE user_id = ? AND folder_id = ?
-        ''', (user_id, folder_id))
-        approval_info = cursor.fetchone()
+        approval_info = db_fetchone(
+            '''
+            SELECT approved, download_completed FROM user_folder_approval
+            WHERE user_id = %s AND folder_id = %s
+            ''',
+            (user_id, folder_id)
+        )
 
-        if not approval_info or approval_info[0] != 1:
+        if not approval_info or not approval_info[0]:
             await notify_admin_for_approval(user_id, folder_id, folder_name)
             await message.reply("Your download request has been sent to the admin for approval.")
             return
 
-        if approval_info[1] == 1:
+        if approval_info[1]:  # download_completed
             await notify_admin_for_approval_again(user_id, folder_id, folder_name)
-            await message.reply("You have already downloaded this folder once. Please contact the Admin to download it again.")
+            await message.reply(
+                "You have already downloaded this folder once. "
+                "Please contact the Admin to download it again."
+            )
             return
 
-    # Temporarily grant premium status if the folder requires admin approval
-    temporary_premium = False
-    if requires_admin_approval and not is_premium:
-        temporary_premium = True
-        is_premium = 1  # Grant premium status temporarily
+    # ── Temporarily grant premium speed for paid-folder users ─────────────
+    temporary_premium = requires_admin_approval and not is_premium
+    if temporary_premium:
+        is_premium = True
 
-    # Simulate connecting to servers with a progress bar
-    progress_message = await message.reply("⚡Connecting to servers...\n[░░░░░░░░░░░░░░░░░░░░░]", parse_mode=ParseMode.MARKDOWN)
+    # ── Progress bar ──────────────────────────────────────────────────────
+    progress_message = await message.reply(
+        "⚡Connecting to servers…\n[░░░░░░░░░░░░░░░░░░░░░]",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
-    progress_bar_length = 21  # Length of the progress bar
-    update_interval = 7 / progress_bar_length  # Time interval for each progress update (7 seconds in total)
+    BAR_LENGTH = 21
+    update_interval = 7 / BAR_LENGTH
 
-    for i in range(1, progress_bar_length + 1):
-        progress_bar = "█" * i + "░" * (progress_bar_length - i)
-        await progress_message.edit_text(f"⚡Connecting to servers...\n[{progress_bar}]", parse_mode=ParseMode.MARKDOWN)
+    for i in range(1, BAR_LENGTH + 1):
+        bar = "█" * i + "░" * (BAR_LENGTH - i)
+        try:
+            await progress_message.edit_text(f"⚡Connecting to servers…\n[{bar}]", parse_mode=ParseMode.MARKDOWN)
+        except MessageNotModified:
+            pass
         await asyncio.sleep(update_interval)
 
-    # Display "Download starting..." message for 3 seconds
-    await progress_message.edit_text("🚀Download is starting...", parse_mode=ParseMode.MARKDOWN)
+    await progress_message.edit_text("🚀 Download is starting…", parse_mode=ParseMode.MARKDOWN)
     await asyncio.sleep(3)
-    
-    # Determine if a delay should be applied between files
-    file_interval = 5 if is_premium else 60  # 5 seconds for premium users, 1 minute (60 seconds) for free users
 
-    # The time interval to delay the next download, based on user type
-    time_interval = timedelta(minutes=2) if is_premium else timedelta(minutes=7)
+    # ── Per-file delay & cooldown period ─────────────────────────────────
+    file_interval   = 5   if is_premium else 60
+    time_interval   = timedelta(minutes=2) if is_premium else timedelta(minutes=7)
+    next_dl_minutes = int(time_interval.total_seconds() / 60)
 
-    next_download_time = (time_interval.total_seconds() / 60)
-
-    # Update the folder_type based on whether it is premium or requires admin approval
     if requires_admin_approval:
         folder_type = "Paid"
     elif is_premium_folder:
@@ -107,162 +129,178 @@ async def get_all_files(message: types.Message):
     else:
         folder_type = "Free"
 
-    # Customize the info_message based on user type and folder type
     if is_premium:
         info_message = (
             f"🎉 *Premium User*\n\n"
             f"User ID: `{user_id}`\n"
-            f"Folder Name: `{folder_name}`\n"
-            f"Folder Type: `{folder_type} folder`\n"
+            f"Folder: `{folder_name}` ({folder_type})\n"
             f"Delay Between Files: `{file_interval} secs`\n"
-            f"Next Download only after `{int(next_download_time)} mins`\n\n"
+            f"Next Download after: `{next_dl_minutes} mins`\n\n"
             "🙌 *Thank You for Downloading!*"
         )
     else:
         info_message = (
             f"🔓 *Free User*\n\n"
             f"User ID: `{user_id}`\n"
-            f"Folder Name: `{folder_name}`\n"
-            f"Folder Type: `{folder_type} folder`\n"
+            f"Folder: `{folder_name}` ({folder_type})\n"
             f"Delay Between Files: `{file_interval} secs`\n"
-            f"Next Download only after `{int(next_download_time)} mins`\n\n"
+            f"Next Download after: `{next_dl_minutes} mins`\n\n"
             "🎉 *Consider Upgrading to Premium for Faster Downloads!*"
         )
 
-
     await progress_message.edit_text(info_message, parse_mode=ParseMode.MARKDOWN)
 
-    # Increment the download count
-    cursor.execute('''
-    UPDATE folders
-    SET download_count = download_count + 1
-    WHERE id = ?
-    ''', (folder_id,))
-    conn.commit()
+    # ── Increment download counter ────────────────────────────────────────
+    db_execute(
+        'UPDATE folders SET download_count = download_count + 1 WHERE id = %s',
+        (folder_id,)
+    )
 
-    # Get the file IDs, names, and captions in the folder
-    cursor.execute('SELECT file_id, file_name, caption, file_type FROM files WHERE folder_id = ?', (folder_id,))
-    files = cursor.fetchall()
+    # ── Fetch & send files ────────────────────────────────────────────────
+    files = db_fetchall(
+        'SELECT file_id, file_name, caption, file_type FROM files WHERE folder_id = %s',
+        (folder_id,)
+    )
 
-    if files:
-        # Determine the time to delete messages based on the number of files
-        num_files = len(files)
-        if num_files <= 25:
-            delete_time = 120  # 2 minutes in seconds
-        elif num_files <= 50:
-            delete_time = 180  # 3 minutes in seconds
-        elif num_files <= 75:
-            delete_time = 240  # 4 minutes in seconds
-        else:
-            delete_time = 300  # Default to 5 minutes if more than 75 files
+    if not files:
+        await message.reply("No files found in the specified folder.")
+        return
 
-        messages_to_delete = []
+    num_files = len(files)
+    if num_files <= 25:
+        delete_time = 120
+    elif num_files <= 50:
+        delete_time = 180
+    elif num_files <= 75:
+        delete_time = 240
+    else:
+        delete_time = 300
 
-        for index, file in enumerate(files):
-            file_id, file_name, caption, file_type = file
+    messages_to_delete = []
 
+    for index, file in enumerate(files):
+        file_id, file_name, caption, file_type = file
+        try:
             if file_type == 'document':
-                sent_message = await bot.send_document(message.chat.id, file_id, caption=caption)
+                sent = await bot.send_document(message.chat.id, file_id, caption=caption)
             elif file_type == 'video':
-                sent_message = await bot.send_video(message.chat.id, file_id, caption=caption)
+                sent = await bot.send_video(message.chat.id, file_id, caption=caption)
             elif file_type == 'photo':
-                sent_message = await bot.send_photo(message.chat.id, file_id, caption=caption)
+                sent = await bot.send_photo(message.chat.id, file_id, caption=caption)
             else:
-                continue  # Skip any unknown file types
-
-            messages_to_delete.append(sent_message.message_id)
-
-            # Wait for the appropriate interval before sending the next file, except after the last file
-            if file_interval > 0 and index < len(files) - 1:
-                await asyncio.sleep(file_interval)
-
-        # Notify the user that files will be deleted and start the countdown immediately
-        warning_message = await message.reply(f"To prevent copyright, the files will be deleted in {delete_time // 60} mins. Forward files to Saved Messages!")
-
-        # Update the last download time for the user after all files are sent
-        current_time = datetime.now()  # Update current time after sending the files
-        cursor.execute('''
-        UPDATE users
-        SET last_download = ?
-        WHERE user_id = ?
-        ''', (current_time.strftime("%Y-%m-%d %H:%M:%S"), user_id))
-        conn.commit()
-
-        # If admin approval was required, mark the download as completed
-        if requires_admin_approval:
-            cursor.execute('''
-            UPDATE user_folder_approval
-            SET download_completed = 1
-            WHERE user_id = ? AND folder_id = ?
-            ''', (user_id, folder_id))
-            conn.commit()
-
-        # Revert the premium status if it was temporarily granted
-        if temporary_premium:
-            cursor.execute('''
-            UPDATE users
-            SET premium = 0
-            WHERE user_id = ?
-            ''', (user_id,))
-            conn.commit()
-
-        # Schedule deletion of messages after the calculated time
-        await asyncio.sleep(delete_time)
-
-        for message_id in messages_to_delete:
-            try:
-                await bot.delete_message(message.chat.id, message_id)
-            except exceptions.MessageToDeleteNotFound:
+                logging.warning(f"Unknown file type '{file_type}' for file_id {file_id}, skipping.")
                 continue
 
-        # Edit the warning message to indicate files have been deleted
+            messages_to_delete.append(sent.message_id)
+        except Exception as e:
+            logging.error(f"Error sending file {file_id}: {e}")
+            continue
+
+        if file_interval > 0 and index < len(files) - 1:
+            await asyncio.sleep(file_interval)
+
+    # ── Post-send bookkeeping ─────────────────────────────────────────────
+    warning_message = await message.reply(
+        f"⚠️ To prevent copyright, the files will be deleted in "
+        f"{delete_time // 60} min(s). Forward to Saved Messages now!"
+    )
+
+    db_execute(
+        'UPDATE users SET last_download = %s WHERE user_id = %s',
+        (datetime.now(), user_id)
+    )
+
+    if requires_admin_approval:
+        db_execute(
+            '''
+            UPDATE user_folder_approval
+            SET download_completed = TRUE
+            WHERE user_id = %s AND folder_id = %s
+            ''',
+            (user_id, folder_id)
+        )
+
+    # ── Schedule deletion ─────────────────────────────────────────────────
+    await asyncio.sleep(delete_time)
+
+    for msg_id in messages_to_delete:
         try:
-            await bot.edit_message_text("All Downloaded files deleted.\nAll the Best!", chat_id=message.chat.id, message_id=warning_message.message_id)
-        except MessageNotModified:
-            pass
-    else:
-        await message.reply("No files found in the specified folder.")
+            await bot.delete_message(message.chat.id, msg_id)
+        except exceptions.MessageToDeleteNotFound:
+            continue
+        except Exception as e:
+            logging.error(f"Error deleting message {msg_id}: {e}")
+
+    try:
+        await bot.edit_message_text(
+            "✅ All downloaded files have been deleted.\nAll the Best!",
+            chat_id=message.chat.id,
+            message_id=warning_message.message_id
+        )
+    except MessageNotModified:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin: approve / reject paid-folder download requests
+# ─────────────────────────────────────────────────────────────────────────────
 
 async def handle_approval(message: types.Message):
     from main import bot
+    try:
+        parts = message.text.split()
+        if len(parts) != 3:
+            raise ValueError("Expected /approve <user_id> <folder_id>")
+        _, user_id, folder_id = parts
+        user_id, folder_id = int(user_id), int(folder_id)
+    except ValueError as e:
+        await message.reply(f"Usage: /approve <user_id> <folder_id>\n\nError: {e}")
+        return
 
     try:
-        _, user_id, folder_id = message.text.split()
-        user_id, folder_id = int(user_id), int(folder_id)
-        
-        # Update the approval status in the database
-        cursor.execute('''
-        INSERT INTO user_folder_approval (user_id, folder_id, approved) 
-        VALUES (?, ?, 1)
-        ON CONFLICT(user_id, folder_id) DO UPDATE SET approved = 1, download_completed = 0
-        ''', (user_id, folder_id))
-        conn.commit()
-
-        # Notify the user that they are approved
-        await bot.send_message(user_id, "Your request to download the folder has been approved by the admin. You can now download it.\n\nOnly 01 download is allowed.\nYou will be given Premium download speed.")
-        await message.reply("User has been approved.")
-        
+        db_execute(
+            '''
+            INSERT INTO user_folder_approval (user_id, folder_id, approved)
+            VALUES (%s, %s, TRUE)
+            ON CONFLICT (user_id, folder_id) DO UPDATE SET approved = TRUE, download_completed = FALSE
+            ''',
+            (user_id, folder_id)
+        )
+        await bot.send_message(
+            user_id,
+            "✅ Your request to download the folder has been approved by the admin.\n\n"
+            "Only *1 download* is allowed.\nYou will get Premium download speed.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        await message.reply("✅ User has been approved.")
     except Exception as e:
         logging.error(f"Error in handle_approval: {e}")
         await message.reply("Failed to approve the user.")
 
+
 async def handle_rejection(message: types.Message):
     from main import bot
+    try:
+        parts = message.text.split()
+        if len(parts) != 3:
+            raise ValueError("Expected /reject <user_id> <folder_id>")
+        _, user_id, folder_id = parts
+        user_id, folder_id = int(user_id), int(folder_id)
+    except ValueError as e:
+        await message.reply(f"Usage: /reject <user_id> <folder_id>\n\nError: {e}")
+        return
 
     try:
-        _, user_id, folder_id = message.text.split()
-        user_id, folder_id = int(user_id), int(folder_id)
-
-        # Update the approval status in the database to rejected
-        cursor.execute('''
-        DELETE FROM user_folder_approval WHERE user_id = ? AND folder_id = ?
-        ''', (user_id, folder_id))
-        conn.commit()
-
-        # Notify the user that they are rejected
-        await bot.send_message(user_id, "Your request to download the folder has been rejected by the admin. If you think this is a mistake, contact the Admin.")
-        await message.reply("User's request has been rejected.")
-        
+        db_execute(
+            'DELETE FROM user_folder_approval WHERE user_id = %s AND folder_id = %s',
+            (user_id, folder_id)
+        )
+        await bot.send_message(
+            user_id,
+            "❌ Your request to download the folder has been rejected by the admin.\n\n"
+            "If you think this is a mistake, contact the Admin."
+        )
+        await message.reply("❌ User's request has been rejected.")
     except Exception as e:
         logging.error(f"Error in handle_rejection: {e}")
         await message.reply("Failed to reject the user.")
