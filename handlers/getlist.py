@@ -1,61 +1,71 @@
 import logging
 from aiogram import types
 from aiogram.types import ParseMode
-from middlewares.authorization import is_private_chat, is_user_member
-from config import ADMIN_IDS, REQUIRED_CHANNELS
+from middlewares.authorization import is_private_chat
+from config import ADMIN_IDS
 from utils.database import db_fetchall
 
 
 async def list_all(message: types.Message):
-    """Admin command: /list — show all folders, users, premium stats."""
+    """Admin command: /list — show all folders, users, and premium stats."""
     if not is_private_chat(message):
         return
 
-    user_id = message.from_user.id
-
-    # Re-use the same pattern: channel membership + admin check
-    if not await is_user_member(user_id):
-        join_message = "Welcome to The Medical Content Bot ✨\n\nJoin our backup channels to remain connected ✊\n"
-        for channel in REQUIRED_CHANNELS:
-            join_message += f"{channel}\n"
-        await message.reply(join_message)
-        return
-
-    if str(user_id) not in ADMIN_IDS:
-        await message.reply("You are not authorized to access the database.")
+    if str(message.from_user.id) not in ADMIN_IDS:
+        await message.reply("You are not authorized.")
         return
 
     try:
-        folders               = db_fetchall('SELECT id, name, download_count FROM folders ORDER BY name')
-        premium_folders       = db_fetchall('SELECT id, name, download_count FROM folders WHERE premium = TRUE ORDER BY name')
-        admin_approval_folders= db_fetchall('SELECT id, name, download_count FROM folders WHERE admin_approval = TRUE ORDER BY name')
+        folders         = db_fetchall('SELECT id, name, download_count FROM folders ORDER BY name')
+        premium_folders = db_fetchall('SELECT id, name FROM folders WHERE premium = TRUE ORDER BY name')
+        paid_folders    = db_fetchall('SELECT id, name FROM folders WHERE admin_approval = TRUE ORDER BY name')
 
-        users         = db_fetchall("SELECT user_id, status FROM users ORDER BY user_id")
-        premium_users = db_fetchall("SELECT user_id, premium_expiration FROM users WHERE premium = TRUE")
-        pending_users = db_fetchall("SELECT user_id FROM users WHERE status = 'pending'")
+        all_users     = db_fetchall("SELECT user_id, username, first_name, status FROM users ORDER BY user_id")
+        premium_users = db_fetchall(
+            "SELECT user_id, username, first_name, premium_expiration FROM users WHERE premium = TRUE"
+        )
+        pending_users = db_fetchall(
+            "SELECT user_id, username, first_name FROM users WHERE status = 'pending'"
+        )
 
         lines = []
 
+        # ── Folders ───────────────────────────────────────────────────────────
         lines.append("<b>📁 All Folders:</b>")
-        lines += [f"  • {f[1]} (ID: {f[0]}, ⬇️ {f[2]})" for f in folders] or ["  None"]
-
-        lines.append("\n<b>⭐ Premium Folders:</b>")
-        lines += [f"  • {f[1]} (ID: {f[0]}, ⬇️ {f[2]})" for f in premium_folders] or ["  None"]
-
-        lines.append("\n<b>💰 Paid (Admin-Approval) Folders:</b>")
-        lines += [f"  • {f[1]} (ID: {f[0]}, ⬇️ {f[2]})" for f in admin_approval_folders] or ["  None"]
-
-        lines.append(f"\n<b>👥 Total Users: {len(users)}</b>")
-        lines.append(f"  Pending approval: {len(pending_users)}")
-
-        lines.append("\n<b>🌟 Premium Users:</b>")
-        if premium_users:
-            for uid, exp in premium_users:
-                exp_str = exp.strftime('%Y-%m-%d') if exp else "N/A"
-                lines.append(f"  • {uid} (expires: {exp_str})")
+        if folders:
+            for fid, fname, dl_count in folders:
+                lines.append(f"  • {fname} (ID: {fid}, ⬇️ {dl_count})")
         else:
             lines.append("  None")
 
+        lines.append("\n<b>⭐ Premium Folders:</b>")
+        lines += [f"  • {f[1]} (ID: {f[0]})" for f in premium_folders] or ["  None"]
+
+        lines.append("\n<b>💰 Paid (Admin-Approval) Folders:</b>")
+        lines += [f"  • {f[1]} (ID: {f[0]})" for f in paid_folders] or ["  None"]
+
+        # ── Users ─────────────────────────────────────────────────────────────
+        lines.append(f"\n<b>👥 Total Users: {len(all_users)}</b>")
+        lines.append(f"  ⏳ Pending: {len(pending_users)}")
+
+        if pending_users:
+            lines.append("\n<b>⏳ Pending Approval:</b>")
+            for uid, uname, fname in pending_users:
+                name_str  = fname or "Unknown"
+                uname_str = f"@{uname}" if uname else "no username"
+                lines.append(f"  • {name_str} ({uname_str}) — ID: {uid}")
+
+        lines.append("\n<b>🌟 Premium Users:</b>")
+        if premium_users:
+            for uid, uname, fname, exp in premium_users:
+                name_str  = fname or "Unknown"
+                uname_str = f"@{uname}" if uname else "no username"
+                exp_str   = exp.strftime('%d %b %Y') if exp else "N/A"
+                lines.append(f"  • {name_str} ({uname_str}) — expires {exp_str}")
+        else:
+            lines.append("  None")
+
+        # ── Chunk and send ────────────────────────────────────────────────────
         response = "\n".join(lines)
         max_len  = 4096
         chunks   = [response[i:i + max_len] for i in range(0, len(response), max_len)]

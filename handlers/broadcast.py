@@ -1,14 +1,23 @@
+import asyncio
 import logging
-from aiogram import types
-from aiogram.types import ParseMode
+from aiogram import types, exceptions
+from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS
-from utils.database import db_fetchall
+from utils.database import db_fetchall, db_execute, db_fetchone
+
+# Telegram's flood-limit ceiling is ~30 msg/s for bots.
+# 50ms between messages = 20 msg/s — safe headroom.
+_BROADCAST_DELAY = 0.05  # seconds
 
 
 async def broadcast_message(message: types.Message):
-    """Admin command: /broadcast <text> — send a message to all users."""
-    from main import bot
+    """/broadcast [html|md] <text>
+
+    Step 1 of 2: parse the message, store it in the DB as a pending broadcast,
+    then send the admin a preview with [✅ Send Now] / [❌ Cancel] buttons.
+    The actual send happens in execute_broadcast() called from the callback handler.
+    """
     if not is_private_chat(message):
         return
 
@@ -16,34 +25,180 @@ async def broadcast_message(message: types.Message):
         await message.reply("You are not authorized to send broadcasts.")
         return
 
-    text = message.get_args()
-    if not text:
+    args = message.get_args()
+    if not args:
         await message.reply(
-            "Usage: `/broadcast <your message>`",
-            parse_mode=ParseMode.MARKDOWN
+            "Usage: <code>/broadcast &lt;message&gt;</code>\n\n"
+            "<b>Optional format prefix:</b>\n"
+            "  <code>/broadcast html &lt;b&gt;Bold&lt;/b&gt;</code> — HTML\n"
+            "  <code>/broadcast md *Bold*</code> — Markdown\n"
+            "  <code>/broadcast Plain text</code> — no formatting",
+            parse_mode=ParseMode.HTML
         )
         return
 
-    try:
-        # Only send to approved users to avoid spamming pending/rejected accounts
-        users = db_fetchall("SELECT user_id FROM users WHERE status = 'approved'")
-    except Exception as e:
-        logging.error(f"Error fetching users for broadcast: {e}")
-        await message.reply("Error fetching users. Please try again later.")
+    # ── Parse optional format prefix ─────────────────────────────────────────
+    parse_mode = None
+    parts = args.split(' ', 1)
+    if parts[0].lower() == 'html' and len(parts) > 1:
+        parse_mode = 'HTML'
+        text = parts[1]
+    elif parts[0].lower() in ('md', 'markdown') and len(parts) > 1:
+        parse_mode = 'MARKDOWN'
+        text = parts[1]
+    else:
+        text = args
+
+    # ── Count recipients ──────────────────────────────────────────────────────
+    users = db_fetchall("SELECT user_id FROM users WHERE status = 'approved'")
+    count = len(users) if users else 0
+
+    # ── Persist in DB (so confirmation survives a restart) ────────────────────
+    # Delete any previous pending broadcast from this admin first (only 1 at a time)
+    db_execute('DELETE FROM pending_broadcasts WHERE admin_id = %s', (message.from_user.id,))
+    db_execute(
+        'INSERT INTO pending_broadcasts (admin_id, message_text, parse_mode) VALUES (%s, %s, %s)',
+        (message.from_user.id, text, parse_mode)
+    )
+    row = db_fetchone(
+        'SELECT id FROM pending_broadcasts WHERE admin_id = %s ORDER BY id DESC LIMIT 1',
+        (message.from_user.id,)
+    )
+    broadcast_id = row[0] if row else None
+
+    # ── Send preview to admin ─────────────────────────────────────────────────
+    kb = InlineKeyboardMarkup()
+    kb.row(
+        InlineKeyboardButton(f"✅ Send to {count} users", callback_data=f"bcast_send:{broadcast_id}"),
+        InlineKeyboardButton("❌ Cancel",                callback_data=f"bcast_cancel:{broadcast_id}"),
+    )
+
+    pm_label = {'HTML': 'HTML', 'MARKDOWN': 'Markdown', None: 'Plain text'}.get(parse_mode, 'Plain')
+
+    await message.reply(
+        f"<b>📤 Broadcast Preview</b>  •  {pm_label}\n"
+        f"<i>This is exactly how it will appear to users:</i>\n"
+        "─────────────────────",
+        parse_mode=ParseMode.HTML
+    )
+
+    # Send the actual preview in the user's chosen format so it renders correctly
+    await message.answer(text, parse_mode=parse_mode)
+
+    await message.answer(
+        "─────────────────────\n"
+        f"👥 Recipients: <b>{count}</b> approved user(s)\n\n"
+        "Tap <b>Send</b> to confirm, or <b>Cancel</b> to discard.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=kb
+    )
+
+
+async def execute_broadcast(callback_query: types.CallbackQuery, broadcast_id: int):
+    """Step 2 of 2: called from process_callback when admin taps [✅ Send Now].
+    Fetches the pending broadcast from DB and sends it to all approved users.
+    """
+    from main import bot
+
+    # Load from DB
+    row = db_fetchone(
+        'SELECT admin_id, message_text, parse_mode FROM pending_broadcasts WHERE id = %s',
+        (broadcast_id,)
+    )
+    if not row:
+        await bot.answer_callback_query(
+            callback_query.id,
+            "Broadcast expired or already sent.",
+            show_alert=True
+        )
         return
 
-    success = 0
-    failed  = 0
+    admin_id, text, parse_mode = row
+
+    # Security: only the original admin can confirm
+    if callback_query.from_user.id != admin_id:
+        await bot.answer_callback_query(
+            callback_query.id, "Not authorized.", show_alert=True
+        )
+        return
+
+    await bot.answer_callback_query(callback_query.id, "📢 Sending…")
+
+    # Remove buttons from preview message
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=callback_query.message.chat.id,
+            message_id=callback_query.message.message_id,
+            reply_markup=None
+        )
+        await bot.edit_message_text(
+            "📢 <b>Broadcast in progress…</b>",
+            chat_id=callback_query.message.chat.id,
+            message_id=callback_query.message.message_id,
+            parse_mode=ParseMode.HTML
+        )
+    except Exception:
+        pass
+
+    # Delete from DB immediately so duplicate sends are impossible
+    db_execute('DELETE FROM pending_broadcasts WHERE id = %s', (broadcast_id,))
+
+    users = db_fetchall("SELECT user_id FROM users WHERE status = 'approved'")
+    if not users:
+        await bot.send_message(admin_id, "No approved users to broadcast to.")
+        return
+
+    success = failed = blocked = 0
 
     for (user_id,) in users:
         try:
-            await bot.send_message(user_id, text)
+            await bot.send_message(user_id, text, parse_mode=parse_mode)
             success += 1
+        except exceptions.BotBlocked:
+            blocked += 1
+        except exceptions.RetryAfter as e:
+            logging.warning(f"Broadcast flood limit — waiting {e.timeout}s")
+            await asyncio.sleep(e.timeout)
+            try:
+                await bot.send_message(user_id, text, parse_mode=parse_mode)
+                success += 1
+            except Exception:
+                failed += 1
         except Exception as e:
             logging.error(f"Broadcast failed for user {user_id}: {e}")
             failed += 1
 
-    await message.reply(
-        f"📢 Broadcast complete.\n✅ Sent: {success}\n❌ Failed: {failed}",
-        parse_mode=ParseMode.MARKDOWN
+        await asyncio.sleep(_BROADCAST_DELAY)
+
+    await bot.send_message(
+        admin_id,
+        f"📢 <b>Broadcast Complete</b>\n\n"
+        f"✅ Sent:    <b>{success}</b>\n"
+        f"🚫 Blocked: <b>{blocked}</b>\n"
+        f"❌ Failed:  <b>{failed}</b>\n"
+        f"📊 Total:   <b>{len(users)}</b>",
+        parse_mode=ParseMode.HTML
     )
+
+
+async def cancel_broadcast(callback_query: types.CallbackQuery, broadcast_id: int):
+    """Called from process_callback when admin taps [❌ Cancel]."""
+    from main import bot
+
+    row = db_fetchone('SELECT admin_id FROM pending_broadcasts WHERE id = %s', (broadcast_id,))
+    if row and row[0] != callback_query.from_user.id:
+        await bot.answer_callback_query(callback_query.id, "Not authorized.", show_alert=True)
+        return
+
+    db_execute('DELETE FROM pending_broadcasts WHERE id = %s', (broadcast_id,))
+    await bot.answer_callback_query(callback_query.id, "Broadcast cancelled.")
+
+    try:
+        await bot.edit_message_text(
+            "❌ <b>Broadcast cancelled.</b>",
+            chat_id=callback_query.message.chat.id,
+            message_id=callback_query.message.message_id,
+            parse_mode=ParseMode.HTML
+        )
+    except Exception:
+        pass

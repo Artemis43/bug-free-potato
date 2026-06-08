@@ -1,0 +1,9 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  razorpay_webhook — dependencies
+# ─────────────────────────────────────────────────────────────────────────────
+fastapi==0.115.5          # Web framework (ASGI)
+uvicorn[standard]==0.32.0 # ASGI server with auto-reload + uvloop
+httpx==0.27.2             # HTTP client for Telegram Bot API calls
+psycopg2-binary==2.9.9    # PostgreSQL driver (same as bot)
+python-dotenv==1.0.1      # .env file loader
+razorpay==2.0.1           # Razorpay Python SDK (for /health check)

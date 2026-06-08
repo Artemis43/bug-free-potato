@@ -3,23 +3,16 @@ import asyncio
 from datetime import datetime, timedelta
 from aiogram import types, exceptions
 from aiogram.types import ParseMode
-from config import REQUIRED_CHANNELS, ADMIN_IDS
-from middlewares.authorization import is_private_chat, is_user_member
-from utils.database import db_fetchone, db_fetchall, db_execute
+from config import ADMIN_IDS, PREMIUM_INFO_URL
+from middlewares.authorization import is_private_chat
+from utils.database import db_fetchone, db_execute
+from utils.helpers import esc
 
 
 async def set_premium_status(message: types.Message):
-    """Admin command: /setfolder <folder_id> <0|1>  — toggle folder premium flag."""
+    """Admin: /setfolder <folder_id> <0|1> — toggle folder premium flag."""
     if not is_private_chat(message):
         return
-
-    if not await is_user_member(message.from_user.id):
-        join_message = "Welcome to The Medical Content Bot ✨\n\nJoin our backup channels to remain connected ✊\n"
-        for channel in REQUIRED_CHANNELS:
-            join_message += f"{channel}\n"
-        await message.reply(join_message)
-        return
-
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.reply("You are not authorized.")
         return
@@ -30,44 +23,42 @@ async def set_premium_status(message: types.Message):
             raise ValueError("Wrong number of arguments.")
         folder_id      = int(parts[1])
         premium_status = int(parts[2])
-
         if premium_status not in (0, 1):
             raise ValueError("Premium status must be 0 or 1.")
 
-        db_execute(
-            'UPDATE folders SET premium = %s WHERE id = %s',
-            (bool(premium_status), folder_id)
-        )
+        db_execute('UPDATE folders SET premium = %s WHERE id = %s', (bool(premium_status), folder_id))
+        label = "⭐ Premium" if premium_status else "🔓 Free"
         await message.reply(
-            f"✅ Folder ID `{folder_id}` premium status set to `{premium_status}`.",
-            parse_mode=ParseMode.MARKDOWN
+            f"✅ Folder ID <code>{folder_id}</code> is now <b>{label}</b>.",
+            parse_mode=ParseMode.HTML
         )
     except (IndexError, ValueError) as e:
-        await message.reply(f"Usage: `/setfolder <folder_id> <0 or 1>`\n\nError: {e}", parse_mode=ParseMode.MARKDOWN)
+        await message.reply(
+            f"Usage: <code>/setfolder &lt;folder_id&gt; &lt;0 or 1&gt;</code>\n\nError: {e}",
+            parse_mode=ParseMode.HTML
+        )
     except Exception as e:
         await message.reply(f"Database error: {e}")
 
 
 async def set_premium(message: types.Message):
-    """Admin command: /setuser <user_id> <on|off|days:<N>>  — manage user premium."""
+    """Admin: /setuser <user_id> <on|off|days:N> — manage user premium."""
     from main import bot
     if not is_private_chat(message):
         return
-
     if str(message.from_user.id) not in ADMIN_IDS:
-        await message.reply("You are not authorized to perform this action.")
+        await message.reply("You are not authorized.")
         return
 
     args = message.get_args().split()
-
     if len(args) < 2:
         await message.reply(
-            "Usage: `/setuser <user_id> <on|off|days:<N>>`\n"
+            "Usage: <code>/setuser &lt;user_id&gt; &lt;on|off|days:N&gt;</code>\n\n"
             "Examples:\n"
-            "  `/setuser 123456 on` — 10 days\n"
-            "  `/setuser 123456 days:30` — custom duration\n"
-            "  `/setuser 123456 off` — revoke premium",
-            parse_mode=ParseMode.MARKDOWN
+            "  <code>/setuser 123456 on</code> — 10 days (default)\n"
+            "  <code>/setuser 123456 days:30</code> — custom duration\n"
+            "  <code>/setuser 123456 off</code> — revoke premium",
+            parse_mode=ParseMode.HTML
         )
         return
 
@@ -87,13 +78,19 @@ async def set_premium(message: types.Message):
             if days <= 0:
                 raise ValueError()
         except ValueError:
-            await message.reply("Invalid days value. Use `days:<positive integer>`.", parse_mode=ParseMode.MARKDOWN)
+            await message.reply(
+                "Invalid days value. Use <code>days:&lt;positive integer&gt;</code>.",
+                parse_mode=ParseMode.HTML
+            )
             return
         action = 'on'
     elif action == 'off':
         days = 0
     else:
-        await message.reply("Invalid action. Use `on`, `off`, or `days:<N>`.", parse_mode=ParseMode.MARKDOWN)
+        await message.reply(
+            "Invalid action. Use <code>on</code>, <code>off</code>, or <code>days:&lt;N&gt;</code>.",
+            parse_mode=ParseMode.HTML
+        )
         return
 
     if action == 'on':
@@ -103,29 +100,43 @@ async def set_premium(message: types.Message):
             (expiration_date, user_id)
         )
         await message.reply(
-            f"✅ User `{user_id}` is now Premium for *{days} days* "
-            f"(until {expiration_date.strftime('%Y-%m-%d %H:%M')}).",
-            parse_mode=ParseMode.MARKDOWN
+            f"✅ User <code>{user_id}</code> is now <b>Premium</b> for <b>{days} days</b>\n"
+            f"(until {expiration_date.strftime('%d %b %Y %H:%M')}).",
+            parse_mode=ParseMode.HTML
         )
         try:
             await bot.send_message(
                 user_id,
-                f"🎉 Congratulations! You have been upgraded to *Premium* for *{days} days*.",
-                parse_mode=ParseMode.MARKDOWN
+                f"🎉 <b>You're now a Premium member!</b>\n\n"
+                f"Your premium lasts <b>{days} days</b> (until {expiration_date.strftime('%d %b %Y')}).\n\n"
+                f"✨ You now get:\n"
+                f"  • 5-second interval between files\n"
+                f"  • 2-minute cooldown between downloads\n"
+                f"  • Access to Premium-only folders\n\n"
+                f"Use /start to explore!",
+                parse_mode=ParseMode.HTML
             )
         except exceptions.BotBlocked:
-            await message.reply(f"Could not notify user {user_id} — they have blocked the bot.")
+            await message.reply(f"Could not notify user {user_id} — they've blocked the bot.")
 
         asyncio.create_task(remove_premium_after_expiry(user_id, expiration_date))
 
-    else:  # off
+    else:
         db_execute(
             'UPDATE users SET premium = FALSE, premium_expiration = NULL WHERE user_id = %s',
             (user_id,)
         )
-        await message.reply(f"✅ User `{user_id}` premium status revoked.", parse_mode=ParseMode.MARKDOWN)
+        await message.reply(
+            f"✅ User <code>{user_id}</code> premium revoked.", parse_mode=ParseMode.HTML
+        )
         try:
-            await bot.send_message(user_id, "Your Premium membership has been removed.")
+            await bot.send_message(
+                user_id,
+                f"Your Premium membership has ended.\n\n"
+                f"You can still use the bot as a free user.\n"
+                f'<a href="{PREMIUM_INFO_URL}">Upgrade again →</a>',
+                parse_mode=ParseMode.HTML
+            )
         except exceptions.BotBlocked:
             pass
 
@@ -145,8 +156,14 @@ async def remove_premium_after_expiry(user_id: int, expiration_date: datetime):
         (user_id, datetime.now())
     )
     try:
-        await bot.send_message(user_id, "⏰ Your Premium membership has expired.")
+        await bot.send_message(
+            user_id,
+            f"⏰ <b>Your Premium has expired.</b>\n\n"
+            f"You can still use the bot as a free user.\n"
+            f'<a href="{PREMIUM_INFO_URL}">Renew Premium →</a>',
+            parse_mode=ParseMode.HTML
+        )
     except exceptions.BotBlocked:
-        logging.warning(f"Could not notify user {user_id} about premium expiration — bot blocked.")
+        logging.warning(f"Could not notify user {user_id} about premium expiry — bot blocked.")
     except Exception as e:
         logging.error(f"Error notifying user {user_id} of premium expiry: {e}")

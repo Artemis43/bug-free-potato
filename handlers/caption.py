@@ -1,8 +1,9 @@
 from aiogram import types
 from aiogram.types import ParseMode
-from config import REQUIRED_CHANNELS, ADMIN_IDS
-from middlewares.authorization import is_private_chat, is_user_member
-from utils.database import db_fetchone, db_execute
+from config import ADMIN_IDS
+from middlewares.authorization import is_private_chat
+from utils.database import db_execute
+from utils.helpers import esc
 
 
 async def set_caption(message: types.Message):
@@ -10,46 +11,35 @@ async def set_caption(message: types.Message):
     if not is_private_chat(message):
         return
 
-    user_id = message.from_user.id
-
-    user = db_fetchone('SELECT status FROM users WHERE user_id = %s', (user_id,))
-    if not user or user[0] != 'approved':
-        await message.reply("You are not authorized to set captions. Please wait for admin approval.")
-        return
-
-    if not await is_user_member(user_id):
-        join_message = "Welcome to The Medical Content Bot ✨\n\nJoin our backup channels to remain connected ✊\n"
-        for channel in REQUIRED_CHANNELS:
-            join_message += f"{channel}\n"
-        await message.reply(join_message)
-        return
-
-    if str(user_id) not in ADMIN_IDS:
+    if str(message.from_user.id) not in ADMIN_IDS:
         await message.reply("You are not authorized to set captions.")
         return
 
     args = message.get_args()
     if not args:
         await message.reply(
-            "Usage: `/caption <custom|append> <your text>`\n\n"
-            "`custom` — replace all captions with this text\n"
-            "`append` — append this text to existing captions",
-            parse_mode=ParseMode.MARKDOWN
+            "Usage: <code>/caption &lt;custom|append&gt; &lt;your text&gt;</code>\n\n"
+            "<code>custom</code> — replace all captions with this text\n"
+            "<code>append</code> — append this text to existing captions\n\n"
+            "Examples:\n"
+            "<code>/caption custom @Medical_Contentbot</code>\n"
+            "<code>/caption append — Do not redistribute</code>",
+            parse_mode=ParseMode.HTML
         )
         return
 
-    args_split   = args.split(" ", 1)
+    # Split only at the FIRST space so multi-word caption text is preserved
+    args_split   = args.split(' ', 1)
     caption_type = args_split[0].lower()
-    custom_text  = args_split[1] if len(args_split) > 1 else ""
+    custom_text  = args_split[1] if len(args_split) > 1 else ''
 
     if caption_type not in ('custom', 'append'):
         await message.reply(
-            "Invalid option. Use `custom <text>` or `append <text>`.",
-            parse_mode=ParseMode.MARKDOWN
+            "Invalid option. Use <code>custom &lt;text&gt;</code> or <code>append &lt;text&gt;</code>.",
+            parse_mode=ParseMode.HTML
         )
         return
 
-    # Clear old config and insert the new one
     db_execute('DELETE FROM current_caption')
     db_execute(
         'INSERT INTO current_caption (caption_type, custom_text) VALUES (%s, %s)',
@@ -57,6 +47,6 @@ async def set_caption(message: types.Message):
     )
 
     await message.reply(
-        f"✅ Caption set to *{caption_type}*:\n`{custom_text}`",
-        parse_mode=ParseMode.MARKDOWN
+        f"✅ Caption set to <b>{esc(caption_type)}</b>:\n<code>{esc(custom_text)}</code>",
+        parse_mode=ParseMode.HTML
     )
