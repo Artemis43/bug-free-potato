@@ -633,7 +633,27 @@ async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
         except Exception:
             pass
     else:
-        await send_ui(user_id, message_id=cq.message.message_id, is_returning=True)
+        if not await is_user_member(user_id):
+            kb = InlineKeyboardMarkup(row_width=1)
+            for channel in REQUIRED_CHANNELS:
+                title = await get_channel_title(channel)
+                kb.add(InlineKeyboardButton(
+                    f"📢 {title}", url=f"https://t.me/{channel.lstrip('@')}"
+                ))
+            kb.add(InlineKeyboardButton("🔄 Check Subscription / Refresh", callback_data="back_to_main"))
+            try:
+                await bot.edit_message_text(
+                    chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+                    text=(
+                        "Please join our required channels to continue using the bot 👇\n\n"
+                        "After joining all channels, tap the button below to refresh."
+                    ),
+                    reply_markup=kb
+                )
+            except Exception:
+                pass
+        else:
+            await send_ui(user_id, message_id=cq.message.message_id, is_returning=True)
 
 
 # ── Dispatch table — split on ':' gives the key for both prefix and exact data
