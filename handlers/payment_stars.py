@@ -333,7 +333,17 @@ async def successful_payment_handler(message: types.Message) -> None:
             return
 
         name, amount_stars, days = plan
-        expiration_date = datetime.now() + timedelta(days=days)
+
+        # Extend from current expiry if user already has active premium (don't truncate)
+        current_exp_row = db_fetchone(
+            "SELECT premium_expiration FROM users WHERE user_id = %s", (user_id,)
+        )
+        current_exp = current_exp_row[0] if current_exp_row and current_exp_row[0] else None
+        if current_exp is not None:
+            if hasattr(current_exp, 'tzinfo') and current_exp.tzinfo is not None:
+                current_exp = current_exp.replace(tzinfo=None)
+        base_date = max(current_exp, datetime.now()) if (current_exp and current_exp > datetime.now()) else datetime.now()
+        expiration_date = base_date + timedelta(days=days)
 
         db_execute(
             "UPDATE users SET premium = TRUE, premium_expiration = %s WHERE user_id = %s",
@@ -451,7 +461,7 @@ def _notify_admin_premium(bot, user_id: int, plan_name: str, days: int,
 # /payconfig — Stars mode subcommands (called from payment.cmd_payconfig)
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def cmd_payconfig_stars(message: types.Message, args: list[str]) -> None:
+async def cmd_payconfig_stars(message: types.Message, args: list[str]) -> 'bool | None':
     """Handle /payconfig subcommands when PAYMENT_MODE=stars."""
     sub = args[0].lower() if args else "list"
 
@@ -601,11 +611,20 @@ async def cmd_payconfig_stars(message: types.Message, args: list[str]) -> None:
         )
 
     elif sub == "status":
+        plans = get_stars_plans()
+        default_price = default_stars_folder_price()
+        plan_count = len(plans)
+        plan_status = (
+            f"✅ {plan_count} plan(s) configured" if plans
+            else f"⚠️ No plans configured yet — use /payconfig addplan"
+        )
         await message.reply(
-            "⭐ <b>Payment Mode: Telegram Stars</b>\n\n"
+            f"⭐ <b>Payment Mode: Telegram Stars</b>\n\n"
             "No external gateway — Stars payments are handled natively by Telegram.\n"
             "No API keys or webhooks required.\n\n"
-            "Use <code>/payconfig list</code> to see configured plans.",
+            f"<b>Premium Plans:</b> {plan_status}\n"
+            f"<b>Default Folder Price:</b> {default_price} Stars\n\n"
+            "Use <code>/payconfig list</code> to see full configuration.",
             parse_mode=ParseMode.HTML,
         )
 

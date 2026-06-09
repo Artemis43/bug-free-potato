@@ -5,7 +5,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
 from middlewares.authorization import is_private_chat, is_user_member, get_channel_title
 from utils.database import add_user_to_db, db_fetchone, db_execute, db_fetchall
 from utils.helpers import notify_admins, esc
-from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, PREMIUM_INFO_URL, ADMIN_CONTACT, VERIFY_URL
+from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, PREMIUM_INFO_URL, ADMIN_CONTACT, VERIFY_URL, PAYMENT_MODE
 from datetime import datetime, timedelta
 
 # Global throttle for auto-sync
@@ -458,43 +458,77 @@ async def _cb_stars_cancel(cq: types.CallbackQuery, bot, user_id: int) -> None:
 
 
 async def _cb_info_premium(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    """Show the premium purchase screen, routed by PAYMENT_MODE."""
     await bot.answer_callback_query(cq.id)
-    from handlers.payment import _get_plans, _fmt_inr
-    plans = _get_plans()
 
     kb = InlineKeyboardMarkup(row_width=1)
-    if plans:
-        for plan_id, name, amount_paise, days in plans:
-            kb.add(InlineKeyboardButton(
-                f"💳 {name} — {_fmt_inr(amount_paise)} ({days} days)",
-                callback_data=f"pay_plan:{plan_id}",
-            ))
-    kb.row(InlineKeyboardButton("💬 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
-    kb.row(InlineKeyboardButton("◀ Back", callback_data="back_to_main"))
 
-    if plans:
-        plan_lines = "\n".join(
-            f"  • <b>{name}</b> — {_fmt_inr(amount_paise)} / {days} days"
-            for _, name, amount_paise, days in plans
-        )
-        how_to = "Tap a plan below to pay via UPI / Card / Net Banking."
+    if PAYMENT_MODE == 'stars':
+        # -- Telegram Stars mode -----------------------------------------------
+        from handlers.payment_stars import get_stars_plans
+        plans = get_stars_plans()
+
+        if plans:
+            for plan_id, name, amount_stars, days in plans:
+                kb.add(InlineKeyboardButton(
+                    f"⭐ {name} \u2014 {amount_stars} Stars ({days} days)",
+                    callback_data=f"stars_plan:{plan_id}",
+                ))
+            plan_lines = "\n".join(
+                f"  • <b>{name}</b> \u2014 {amount_stars} ⭐ / {days} days"
+                for _, name, amount_stars, days in plans
+            )
+            how_to = "Tap a plan below to pay with Telegram Stars."
+        else:
+            plan_lines = "  Contact admin for current pricing."
+            how_to = f"Message {ADMIN_CONTACT} to get your plan activated."
+
+        kb.row(InlineKeyboardButton(f"📞 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
+        kb.row(InlineKeyboardButton(f"◀ Back", callback_data="back_to_main"))
+
+    elif PAYMENT_MODE == 'razorpay':
+        # -- Razorpay mode -----------------------------------------------------
+        from handlers.payment import _get_plans, _fmt_inr
+        plans = _get_plans()
+
+        if plans:
+            for plan_id, name, amount_paise, days in plans:
+                kb.add(InlineKeyboardButton(
+                    f"💳 {name} \u2014 {_fmt_inr(amount_paise)} ({days} days)",
+                    callback_data=f"pay_plan:{plan_id}",
+                ))
+            plan_lines = "\n".join(
+                f"  • <b>{name}</b> \u2014 {_fmt_inr(amount_paise)} / {days} days"
+                for _, name, amount_paise, days in plans
+            )
+            how_to = "Tap a plan below to pay via UPI / Card / Net Banking."
+        else:
+            plan_lines = "  Contact admin for current pricing."
+            how_to = f"Message {ADMIN_CONTACT} to get your plan activated."
+
+        kb.row(InlineKeyboardButton(f"📞 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
+        kb.row(InlineKeyboardButton(f"◀ Back", callback_data="back_to_main"))
+
     else:
+        # -- Manual mode: no plans, just contact admin -------------------------
         plan_lines = "  Contact admin for current pricing."
         how_to = f"Message {ADMIN_CONTACT} to get your plan activated."
+        kb.row(InlineKeyboardButton(f"📞 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
+        kb.row(InlineKeyboardButton(f"◀ Back", callback_data="back_to_main"))
 
     try:
         await bot.edit_message_text(
             chat_id=cq.message.chat.id, message_id=cq.message.message_id,
             text=(
-                "⭐ <b>Premium Membership</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"⭐ <b>Premium Membership</b>\n"
+                + "━" * 24 + "\n\n"
                 "<b>What you get:</b>\n"
-                "  • ⚡ 5s interval between files  <i>(vs 60s free)</i>\n"
-                "  • ⏱ 2 min cooldown  <i>(vs 7 min free)</i>\n"
-                "  • ⭐ Access to all Premium-only folders\n\n"
+                f"  • ⚡ 5s interval between files  <i>(vs 60s free)</i>\n"
+                f"  • ⏱ 2 min cooldown  <i>(vs 7 min free)</i>\n"
+                f"  • ⭐ Access to all Premium-only folders\n\n"
                 f"<b>Plans:</b>\n{plan_lines}\n\n"
                 f"<b>How to subscribe:</b>\n  {how_to}\n\n"
-                "<i>Tap ◀ Back to return to the folder list.</i>"
+                f"<i>Tap ◀ Back to return to the folder list.</i>"
             ),
             parse_mode=ParseMode.HTML, reply_markup=kb,
         )

@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from aiogram import types
 from aiogram.types import ParseMode
 from middlewares.authorization import is_private_chat, is_user_member
-from config import PREMIUM_INFO_URL, ADMIN_CONTACT
+from config import PREMIUM_INFO_URL, ADMIN_CONTACT, PAYMENT_MODE
 from utils.database import db_fetchone
 from utils.helpers import esc
 
@@ -90,5 +90,13 @@ async def status(message: types.Message):
 
     lines.append(cooldown_line)
     lines.append("\nUse /help to see how to download folders.")
+
+    # Show active payment mode so users know how to purchase
+    _mode_labels = {
+        'stars':    '⭐ Telegram Stars',
+        'razorpay': '💳 Razorpay (INR)',
+        'manual':   '📬 Manual (contact admin)',
+    }
+    lines.append(f"\nPayment mode: {_mode_labels.get(PAYMENT_MODE, PAYMENT_MODE)}")
 
     await message.reply('\n'.join(lines), parse_mode=ParseMode.HTML)

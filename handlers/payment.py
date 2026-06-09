@@ -427,7 +427,17 @@ async def _activate_premium(user_id: int, plan_id: int, razorpay_payment_id: str
         return
 
     name, amount_paise, days = plan
-    expiration_date = datetime.now() + timedelta(days=days)
+
+    # Extend from current expiry if user already has active premium (don't truncate)
+    current_exp_row = db_fetchone(
+        "SELECT premium_expiration FROM users WHERE user_id = %s", (user_id,)
+    )
+    current_exp = current_exp_row[0] if current_exp_row and current_exp_row[0] else None
+    if current_exp is not None:
+        if hasattr(current_exp, 'tzinfo') and current_exp.tzinfo is not None:
+            current_exp = current_exp.replace(tzinfo=None)
+    base_date = max(current_exp, datetime.now()) if (current_exp and current_exp > datetime.now()) else datetime.now()
+    expiration_date = base_date + timedelta(days=days)
 
     db_execute(
         "UPDATE users SET premium = TRUE, premium_expiration = %s WHERE user_id = %s",

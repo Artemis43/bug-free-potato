@@ -235,43 +235,70 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
     _, folder_name, is_premium_folder, requires_admin_approval = folder_info
 
     if is_premium_folder and not is_premium:
-        from handlers.payment import _get_plans, _fmt_inr
-        plans = _get_plans()
-        if plans:
-            cheapest = min(plans, key=lambda p: p[2])  # (id, name, amount_paise, days)
-            extra = [InlineKeyboardButton(
-                f"\u2b50 Get Premium \u2014 {_fmt_inr(cheapest[2])} / {cheapest[3]} days",
-                callback_data=f"pay_plan:{cheapest[0]}"
-            )]
+        from config import PAYMENT_MODE as _PAYMENT_MODE
+        if _PAYMENT_MODE == 'stars':
+            from handlers.payment_stars import get_stars_plans
+            plans = get_stars_plans()
+            if plans:
+                cheapest = min(plans, key=lambda p: p[2])  # (id, name, amount_stars, days)
+                extra = [InlineKeyboardButton(
+                    f"⭐ Get Premium \u2014 {cheapest[2]} Stars / {cheapest[3]} days",
+                    callback_data=f"stars_plan:{cheapest[0]}"
+                )]
+            else:
+                extra = [InlineKeyboardButton(
+                    f"💮 Contact Admin",
+                    url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"
+                )]
+        elif _PAYMENT_MODE == 'razorpay':
+            from handlers.payment import _get_plans, _fmt_inr
+            plans = _get_plans()
+            if plans:
+                cheapest = min(plans, key=lambda p: p[2])  # (id, name, amount_paise, days)
+                extra = [InlineKeyboardButton(
+                    f"⭐ Get Premium \u2014 {_fmt_inr(cheapest[2])} / {cheapest[3]} days",
+                    callback_data=f"pay_plan:{cheapest[0]}"
+                )]
+            else:
+                extra = [InlineKeyboardButton(
+                    f"💬 Contact Admin",
+                    url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"
+                )]
         else:
             extra = [InlineKeyboardButton(
-                "\ud83d\udcac Contact Admin",
+                f"💬 Contact Admin",
                 url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"
             )]
-
-        await overlay(
-            "\u2b50 <b>Premium Folder</b>\n"
-            + "\u2501" * 22 + "\n\n"
-            "This folder is for <b>Premium members only</b>.\n\n"
-            "<b>What Premium gives you:</b>\n"
-            "  \u2022 \u26a1 5s interval between files <i>(vs 60s free)</i>\n"
-            "  \u2022 \u23f1 2 min cooldown <i>(vs 7 min free)</i>\n"
-            "  \u2022 \u2b50 Access to all Premium-only folders\n\n"
-            "<i>Tap the button below to subscribe, or \u25c0 Back to return.</i>",
-            parse_mode=PM.HTML,
-            extra_buttons=extra,
-        )
-        return False
-
     if requires_admin_approval:
         approval = db_fetchone(
             'SELECT approved, download_completed FROM user_folder_approval WHERE user_id = %s AND folder_id = %s',
             (user_id, folder_id)
         )
         if not approval or not approval[0]:
-            from config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, WEBHOOK_HOST
-            if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
-                # \u2500\u2500 Automated payment flow \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+            from config import PAYMENT_MODE as _PM
+            if _PM == 'stars':
+                # -- Telegram Stars automated payment ---------------------------------
+                from handlers.payment_stars import (
+                    get_stars_folder_price, default_stars_folder_price, send_folder_invoice
+                )
+                from main import bot as _bot
+                price = get_stars_folder_price(folder_id)
+                if price is None:
+                    price = default_stars_folder_price()
+                await overlay(
+                    f"💰 <b>Paid Folder: {esc(folder_name)}</b>\n"
+                    + "\u2501" * 22 + "\n\n"
+                    f"One-time purchase \u2192 <b>1 download</b> at Premium speed.\n"
+                    f"Price: <b>{price} ⭐ Stars</b>\n\n"
+                    f"✅ Access is <b>granted instantly</b> after Stars payment.\n\n"
+                    "<i>A Stars payment request will be sent to you.</i>",
+                    parse_mode=PM.HTML,
+                )
+                await send_folder_invoice(_bot, user_id, folder_id)
+
+            elif _PM == 'razorpay':
+                # -- Razorpay automated payment ----------------------------------------
+                from config import WEBHOOK_HOST
                 from handlers.payment import (
                     _get_folder_price, _default_folder_price,
                     _rzp_client, _create_payment_link, _fmt_inr,
@@ -280,7 +307,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                 if price is None:
                     price = _default_folder_price()
                 try:
-                    client   = _rzp_client()
+                    client    = _rzp_client()
                     link_data = _create_payment_link(
                         client, price,
                         f"Folder: {folder_name}",
@@ -300,16 +327,16 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                         (payment_link_id, user_id, folder_id, price),
                     )
                     await overlay(
-                        f"\U0001f4b0 <b>Paid Folder: {esc(folder_name)}</b>\n"
+                        f"💰 <b>Paid Folder: {esc(folder_name)}</b>\n"
                         + "\u2501" * 22 + "\n\n"
                         f"One-time purchase \u2192 <b>1 download</b> at Premium speed.\n"
                         f"Price: <b>{_fmt_inr(price)}</b>\n\n"
-                        "\u2705 Access is <b>granted instantly</b> after payment.\n\n"
-                        "<i>Tap \u25c0 Back to return to the folder list.</i>",
+                        f"✅ Access is <b>granted instantly</b> after payment.\n\n"
+                        f"<i>Tap ◀ Back to return to the folder list.</i>",
                         parse_mode=PM.HTML,
                         extra_buttons=[
                             InlineKeyboardButton(
-                                f"\U0001f4b3 Pay {_fmt_inr(price)}", url=payment_url
+                                f"💳 Pay {_fmt_inr(price)}", url=payment_url
                             )
                         ],
                     )
@@ -318,24 +345,24 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                         f"Payment link failed for user {user_id} folder {folder_id}: {e}"
                     )
                     await overlay(
-                        f"\U0001f4b0 <b>Paid Folder</b>\n\n"
+                        f"💰 <b>Paid Folder</b>\n\n"
                         f"Could not create a payment link right now.\n"
                         f"Please contact {ADMIN_CONTACT}.\n\n"
-                        "<i>Tap \u25c0 Back to return.</i>",
+                        f"<i>Tap ◀ Back to return.</i>",
                         parse_mode=PM.HTML,
                     )
+
             else:
-                # \u2500\u2500 No Razorpay \u2014 manual admin approval fallback \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+                # -- Manual mode: admin approval fallback ----------------------------
                 await notify_admin_for_approval(user_id, folder_id, folder_name)
                 await overlay(
-                    "\U0001f4ec <b>Download Request Sent!</b>\n\n"
+                    f"📬 <b>Download Request Sent!</b>\n\n"
                     "An admin will review it and notify you here.\n"
                     "This usually takes a few hours.\n\n"
-                    "<i>Tap \u25c0 Back to return to the folder list.</i>",
+                    f"<i>Tap ◀ Back to return to the folder list.</i>",
                     parse_mode=PM.HTML,
                 )
             return False
-
         if approval[1]:  # download_completed
             await notify_admin_for_approval_again(user_id, folder_id, folder_name)
             await overlay(
