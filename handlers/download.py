@@ -119,16 +119,13 @@ async def _run_download(bot, chat_id: int, user_id: int,
             (user_id, folder_id)
         )
 
-    # ── Warning with exact deletion time ─────────────────────────────────────
-    deletion_at  = datetime.now() + timedelta(seconds=delete_time)
-    deletion_str = deletion_at.strftime('%I:%M %p')
+    # ── Warning with relative deletion time (timezone-independent) ───────────
     sent_count   = len(messages_to_delete)
 
     warning_message = await bot.send_message(
         chat_id,
         f"✅ <b>{sent_count}/{n} files sent!</b>\n\n"
-        f"⚠️ Files will be <b>auto-deleted at {deletion_str}</b> "
-        f"({delete_time // 60} min from now).\n"
+        f"⚠️ Files will be <b>auto-deleted in {delete_time // 60} minutes</b>.\n"
         f"📌 Forward them to <b>Saved Messages</b> now!",
         parse_mode=ParseMode.HTML
     )
