@@ -77,8 +77,7 @@ async def broadcast_message(message: types.Message):
 
     await message.reply(
         f"<b>📤 Broadcast Preview</b>  •  {pm_label}\n"
-        f"<i>This is exactly how it will appear to users:</i>\n"
-        "─────────────────────",
+        f"<i>This is exactly how it will appear to users:</i>\n",
         parse_mode=ParseMode.HTML
     )
 
@@ -86,7 +85,6 @@ async def broadcast_message(message: types.Message):
     await message.answer(text, parse_mode=parse_mode)
 
     await message.answer(
-        "─────────────────────\n"
         f"👥 Recipients: <b>{count}</b> approved user(s)\n\n"
         "Tap <b>Send</b> to confirm, or <b>Cancel</b> to discard.",
         parse_mode=ParseMode.HTML,

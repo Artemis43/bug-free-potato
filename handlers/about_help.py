@@ -14,22 +14,19 @@ def get_help_content() -> str:
 
     return (
         "<b>How to Use the Medical Content Bot</b> ✨\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
         "📂 <b>Method 1 — Tap a folder button (easiest!)</b>\n"
         "Send /start → tap any folder button → files arrive automatically.\n\n"
         "⌨️ <b>Method 2 — Type a command</b>\n"
         "<code>/download &lt;folder name&gt;</code> — downloads all files from that folder.\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
         "⏳ <b>Cooldown between downloads:</b>\n"
         "  🔓 Free — 7 minutes\n"
         "  ⭐ Premium — 2 minutes\n\n"
         "⏱ <b>Time between files:</b>\n"
         "  🔓 Free — 60 seconds\n"
         "  ⭐ Premium — 5 seconds\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
         "⚠️ <b>Important:</b> Files are deleted after a few minutes to prevent copyright issues.\n"
         "📌 <b>Forward them to Saved Messages immediately!</b>\n\n"
-        f"{premium_upgrade}\n"
+        f"{premium_upgrade}\n\n"
         "📊 Check your account: /status"
     )
 
@@ -47,7 +44,6 @@ def get_about_content() -> str:
         "content to verified students across Telegram.\n\n"
         "Access is limited to verified medical students to protect content creators and "
         "avoid copyright issues. Together, we keep this resource alive! 🙌\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
         f"{premium_upgrade}\n\n"
         "🤝 <b>Support or queries?</b>\n"
         f"Contact us: {ADMIN_CONTACT}\n\n"

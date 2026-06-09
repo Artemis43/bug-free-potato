@@ -10,7 +10,6 @@ from config import ADMIN_IDS
 
 _USER_COMMANDS = """
 <b>📖 Command Reference — Medical Content Bot</b>
-━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>🚀 Getting Started</b>
 
@@ -24,7 +23,6 @@ _USER_COMMANDS = """
 ▸ <code>/about</code>
   What this bot is, who it's for, and how to contact support.
 
-━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>⬇️ Downloading</b>
 
@@ -38,7 +36,6 @@ _USER_COMMANDS = """
   <code>/download First Year Surgery Notes</code>
   ⚠️ Folder name must match exactly (case-sensitive).
 
-━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>📊 Your Account</b>
 
@@ -49,7 +46,6 @@ _USER_COMMANDS = """
   • Last download timestamp
   • Live cooldown countdown (e.g. "3m 12s remaining")
 
-━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>💳 Payments</b>
 
@@ -68,7 +64,6 @@ _USER_COMMANDS = """
   Get folder IDs from /start or /list.
   Example:  <code>/payfolder 5</code>
 
-━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>ℹ️ Cooldown Rules</b>
 
@@ -86,9 +81,7 @@ _USER_COMMANDS = """
 """
 
 _ADMIN_COMMANDS = """
-━━━━━━━━━━━━━━━━━━━━━━━━
 <b>🛠️ Admin Commands</b>
-━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>👥 User Management</b>
 
@@ -118,7 +111,6 @@ _ADMIN_COMMANDS = """
   Useful when a user had a network error mid-download.
   Example:  <code>/resetcooldown 7093051689</code>
 
-━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>⭐ Premium Management</b>
 
@@ -137,7 +129,6 @@ _ADMIN_COMMANDS = """
   Immediately revoke a user's premium.
   Example:  <code>/setuser 7093051689 off</code>
 
-━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>📁 Folder Management</b>
 
@@ -182,8 +173,6 @@ _ADMIN_COMMANDS = """
 """
 
 _ADMIN_COMMANDS_2 = """
-━━━━━━━━━━━━━━━━━━━━━━━━
-
 <b>📢 Broadcasting</b>
 
 ▸ <code>/broadcast &lt;text&gt;</code>
@@ -199,7 +188,6 @@ _ADMIN_COMMANDS_2 = """
   Send a Markdown-formatted broadcast.
   Example:  <code>/broadcast md *Important* update!</code>
 
-━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>💰 Paid Folder Approvals</b>
 
@@ -211,7 +199,6 @@ _ADMIN_COMMANDS_2 = """
   Decline a user's paid-folder request.
   Example:  <code>/reject 7093051689 3</code>
 
-━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>💳 Payment Configuration</b>
 
@@ -250,7 +237,6 @@ _ADMIN_COMMANDS_2 = """
   Columns: user ID · type · amount · date.
   Example:  <code>/payconfig orders 20</code>
 
-━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>🔧 Maintenance</b>
 

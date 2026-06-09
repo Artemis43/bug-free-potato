@@ -173,7 +173,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
             if extra_buttons:
                 for btn in extra_buttons:
                     kb.row(btn)
-            kb.add(InlineKeyboardButton("\u25c0 Back", callback_data="back_to_main"))
+            kb.add(InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main"))
             try:
                 await bot.edit_message_text(
                     chat_id=chat_id,
@@ -218,7 +218,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
             await overlay(
                 f"\u23f3 <b>Cooldown active</b>\n\n"
                 f"Please wait <b>{mins}m {secs}s</b> before your next download.\n\n"
-                f"<i>Tap \u25c0 Back to return to the folder list.</i>",
+                f"<i>Tap 🔙 Back to Menu to return to the folder list.</i>",
                 parse_mode=PM.HTML
             )
             return False
@@ -274,11 +274,10 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
             )]
 
         await overlay(
-            f"⭐ <b>Premium Folder: {esc(folder_name)}</b>\n"
-            + "━" * 22 + "\n\n"
+            f"⭐ <b>Premium Folder: {esc(folder_name)}</b>\n\n"
             "This folder contains premium medical content.\n"
             "Upgrade to premium to access this and all other premium folders.\n\n"
-            "<i>Tap ◀ Back to return to the folder list.</i>",
+            "<i>Tap 🔙 Back to Menu to return to the folder list.</i>",
             parse_mode=PM.HTML,
             extra_buttons=extra
         )
@@ -304,12 +303,11 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                 invoice_url = await create_folder_invoice_link(_bot, folder_id)
                 if invoice_url:
                     await overlay(
-                        f"💰 <b>Paid Folder: {esc(folder_name)}</b>\n"
-                        + "\u2501" * 22 + "\n\n"
+                        f"💰 <b>Paid Folder: {esc(folder_name)}</b>\n\n"
                         f"One-time purchase \u2192 <b>1 download</b> at Premium speed.\n"
                         f"Price: <b>{price} ⭐ Stars</b>\n\n"
                         f"✅ Access is <b>granted instantly</b> after Stars payment.\n\n"
-                        f"<i>Tap ◀ Back to return to the folder list.</i>",
+                        f"<i>Tap 🔙 Back to Menu to return to the folder list.</i>",
                         parse_mode=PM.HTML,
                         extra_buttons=[
                             InlineKeyboardButton(
@@ -322,7 +320,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                         f"💰 <b>Paid Folder</b>\n\n"
                         f"Could not create a Stars payment link right now.\n"
                         f"Please contact {ADMIN_CONTACT}.\n\n"
-                        f"<i>Tap ◀ Back to return.</i>",
+                        f"<i>Tap 🔙 Back to Menu to return.</i>",
                         parse_mode=PM.HTML,
                     )
 
@@ -357,12 +355,11 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                         (payment_link_id, user_id, folder_id, price),
                     )
                     await overlay(
-                        f"💰 <b>Paid Folder: {esc(folder_name)}</b>\n"
-                        + "\u2501" * 22 + "\n\n"
+                        f"💰 <b>Paid Folder: {esc(folder_name)}</b>\n\n"
                         f"One-time purchase \u2192 <b>1 download</b> at Premium speed.\n"
                         f"Price: <b>{_fmt_inr(price)}</b>\n\n"
                         f"✅ Access is <b>granted instantly</b> after payment.\n\n"
-                        f"<i>Tap ◀ Back to return to the folder list.</i>",
+                        f"<i>Tap 🔙 Back to Menu to return to the folder list.</i>",
                         parse_mode=PM.HTML,
                         extra_buttons=[
                             InlineKeyboardButton(
@@ -378,7 +375,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                         f"💰 <b>Paid Folder</b>\n\n"
                         f"Could not create a payment link right now.\n"
                         f"Please contact {ADMIN_CONTACT}.\n\n"
-                        f"<i>Tap ◀ Back to return.</i>",
+                        f"<i>Tap 🔙 Back to Menu to return.</i>",
                         parse_mode=PM.HTML,
                     )
 
@@ -389,7 +386,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                     f"📬 <b>Download Request Sent!</b>\n\n"
                     "An admin will review it and notify you here.\n"
                     "This usually takes a few hours.\n\n"
-                    f"<i>Tap ◀ Back to return to the folder list.</i>",
+                    f"<i>Tap 🔙 Back to Menu to return to the folder list.</i>",
                     parse_mode=PM.HTML,
                 )
             return False
@@ -399,7 +396,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                 "\u26a0\ufe0f <b>Already Downloaded</b>\n\n"
                 f"You've already downloaded this folder once.\n"
                 f"Contact {ADMIN_CONTACT} to request another download.\n\n"
-                "<i>Tap \u25c0 Back to return.</i>",
+                "<i>Tap 🔙 Back to Menu to return.</i>",
                 parse_mode=PM.HTML
             )
             return False

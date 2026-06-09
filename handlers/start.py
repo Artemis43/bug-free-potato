@@ -60,10 +60,8 @@ async def send_ui(chat_id: int, message_id: int = None,
     # ── Header ────────────────────────────────────────────────────────────────
     greeting = f"<b>{chat_name}</b>"
     text = (
-        f"👋 Welcome, {greeting}!\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "🏥 <b>Medical Content Bot</b> ✨\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👋 Welcome, {greeting}!\n\n"
+        "🏥 <b>Medical Content Bot</b> ✨\n\n"
     )
 
     if is_premium_user and premium_expiration:
@@ -111,8 +109,7 @@ async def send_ui(chat_id: int, message_id: int = None,
         page        = max(0, min(page, total_pages - 1))
         page_folders = all_folders[page * _PAGE_SIZE:(page + 1) * _PAGE_SIZE]
 
-        text += f"📂 <b>Available Folders</b> (page {page + 1}/{total_pages}):\n"
-        text += "━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"📂 <b>Available Folders</b> (page {page + 1}/{total_pages}):\n\n"
 
         folder_buttons = []
         for folder_id, folder_name, premium, admin_approval, file_count in page_folders:
@@ -137,19 +134,19 @@ async def send_ui(chat_id: int, message_id: int = None,
                 InlineKeyboardButton(label, callback_data=f"dl:{folder_id}")
             )
 
-        text += "━━━━━━━━━━━━━━━━━━━━\n"
+        text += "\n"
 
-        # Folder buttons (2 per row)
-        for i in range(0, len(folder_buttons), 2):
-            keyboard.row(*folder_buttons[i:i + 2])
+        # Folder buttons (1 per row to span the full message width)
+        for btn in folder_buttons:
+            keyboard.row(btn)
 
         # Pagination controls
         nav_buttons = []
         if page > 0:
-            nav_buttons.append(InlineKeyboardButton("◀ Prev", callback_data=f"pg:{page - 1}"))
+            nav_buttons.append(InlineKeyboardButton(f"◀️ Page {page}", callback_data=f"pg:{page - 1}"))
         nav_buttons.append(InlineKeyboardButton("🔄 Refresh", callback_data=f"pg:{page}"))
         if page < total_pages - 1:
-            nav_buttons.append(InlineKeyboardButton("Next ▶", callback_data=f"pg:{page + 1}"))
+            nav_buttons.append(InlineKeyboardButton(f"Page {page + 2} ▶️", callback_data=f"pg:{page + 1}"))
         keyboard.row(*nav_buttons)
 
         # Info / contact buttons
@@ -486,8 +483,8 @@ async def _cb_info_premium(cq: types.CallbackQuery, bot, user_id: int) -> None:
             plan_lines = "  Contact admin for current pricing."
             how_to = f"Message {ADMIN_CONTACT} to get your plan activated."
 
-        kb.row(InlineKeyboardButton(f"📞 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
-        kb.row(InlineKeyboardButton(f"◀ Back", callback_data="back_to_main"))
+        kb.row(InlineKeyboardButton("📞 Contact Support", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
+        kb.row(InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main"))
 
     elif PAYMENT_MODE == 'razorpay':
         # -- Razorpay mode -----------------------------------------------------
@@ -509,29 +506,28 @@ async def _cb_info_premium(cq: types.CallbackQuery, bot, user_id: int) -> None:
             plan_lines = "  Contact admin for current pricing."
             how_to = f"Message {ADMIN_CONTACT} to get your plan activated."
 
-        kb.row(InlineKeyboardButton(f"📞 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
-        kb.row(InlineKeyboardButton(f"◀ Back", callback_data="back_to_main"))
+        kb.row(InlineKeyboardButton("📞 Contact Support", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
+        kb.row(InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main"))
 
     else:
         # -- Manual mode: no plans, just contact admin -------------------------
         plan_lines = "  Contact admin for current pricing."
         how_to = f"Message {ADMIN_CONTACT} to get your plan activated."
-        kb.row(InlineKeyboardButton(f"📞 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
-        kb.row(InlineKeyboardButton(f"◀ Back", callback_data="back_to_main"))
+        kb.row(InlineKeyboardButton("📞 Contact Support", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
+        kb.row(InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main"))
 
     try:
         await bot.edit_message_text(
             chat_id=cq.message.chat.id, message_id=cq.message.message_id,
             text=(
-                f"⭐ <b>Premium Membership</b>\n"
-                + "━" * 24 + "\n\n"
+                f"⭐ <b>Premium Membership</b>\n\n"
                 "<b>What you get:</b>\n"
                 f"  • ⚡ 5s interval between files  <i>(vs 60s free)</i>\n"
                 f"  • ⏱ 2 min cooldown  <i>(vs 7 min free)</i>\n"
                 f"  • ⭐ Access to all Premium-only folders\n\n"
                 f"<b>Plans:</b>\n{plan_lines}\n\n"
                 f"<b>How to subscribe:</b>\n  {how_to}\n\n"
-                f"<i>Tap ◀ Back to return to the folder list.</i>"
+                f"<i>Tap 🔙 Back to Menu to return to the folder list.</i>"
             ),
             parse_mode=ParseMode.HTML, reply_markup=kb,
         )
@@ -543,13 +539,12 @@ async def _cb_info_verify(cq: types.CallbackQuery, bot, user_id: int) -> None:
     await bot.answer_callback_query(cq.id)
     kb = InlineKeyboardMarkup()
     kb.row(InlineKeyboardButton("📨 Message Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
-    kb.row(InlineKeyboardButton("◀ Back", callback_data="back_to_main"))
+    kb.row(InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main"))
     try:
         await bot.edit_message_text(
             chat_id=cq.message.chat.id, message_id=cq.message.message_id,
             text=(
-                "🎓 <b>Student Verification</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "🎓 <b>Student Verification</b>\n\n"
                 "Access is limited to verified medical students\n"
                 "to protect our content from redistribution.\n\n"
                 "<b>How to verify:</b>\n"
@@ -561,7 +556,7 @@ async def _cb_info_verify(cq: types.CallbackQuery, bot, user_id: int) -> None:
                 "  • Enrollment certificate\n"
                 "  • Fee receipt with your name + course\n\n"
                 "<i>Once approved you'll get a notification here.\n"
-                "Tap ◀ Back to return.</i>"
+                "Tap 🔙 Back to Menu to return.</i>"
             ),
             parse_mode=ParseMode.HTML, reply_markup=kb,
         )
@@ -573,7 +568,7 @@ async def _cb_info_about(cq: types.CallbackQuery, bot, user_id: int) -> None:
     await bot.answer_callback_query(cq.id)
     from handlers.about_help import get_about_content
     kb = InlineKeyboardMarkup()
-    kb.row(InlineKeyboardButton("◀ Back", callback_data="back_to_main"))
+    kb.row(InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main"))
     try:
         await bot.edit_message_text(
             chat_id=cq.message.chat.id, message_id=cq.message.message_id,
@@ -587,7 +582,7 @@ async def _cb_info_help(cq: types.CallbackQuery, bot, user_id: int) -> None:
     await bot.answer_callback_query(cq.id)
     from handlers.about_help import get_help_content
     kb = InlineKeyboardMarkup()
-    kb.row(InlineKeyboardButton("◀ Back", callback_data="back_to_main"))
+    kb.row(InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main"))
     try:
         await bot.edit_message_text(
             chat_id=cq.message.chat.id, message_id=cq.message.message_id,

@@ -328,9 +328,9 @@ async def _create_folder_link(reply_fn, user_id: int, folder_id: int):
 
     await reply_fn(
         f"💰 <b>Paid Folder: {esc(folder_name)}</b>\n\n"
-        f"This is a one-time payment for <b>1 download</b> of this folder.\n"
+        f"This is a one-time payment for <b>1 download</b> of this folder at Premium speed.\n"
         f"Amount: <b>{_fmt_inr(price)}</b>\n\n"
-        "After payment, an admin will approve your download within a few hours.\n\n"
+        f"✅ Access is <b>granted instantly</b> after payment.\n\n"
         "Tap <b>Pay Now</b> to complete via UPI / Card / Net Banking.\n"
         "<i>Link expires in 15 minutes.</i>",
         parse_mode=ParseMode.HTML,
