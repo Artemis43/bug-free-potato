@@ -2,7 +2,7 @@ import asyncio
 import logging
 from aiogram import types, exceptions
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
-from middlewares.authorization import is_private_chat, is_user_member, get_channel_title
+from middlewares.authorization import is_private_chat, is_user_member, get_channel_title, invalidate_member_cache
 from utils.database import add_user_to_db, db_fetchone, db_execute, db_fetchall
 from utils.helpers import notify_admins, esc
 from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, PREMIUM_INFO_URL, ADMIN_CONTACT, VERIFY_URL, PAYMENT_MODE
@@ -189,6 +189,7 @@ async def _cb_page(cq: types.CallbackQuery, bot, user_id: int) -> None:
         )
         return
 
+    invalidate_member_cache(user_id)
     if not await is_user_member(user_id):
         await bot.answer_callback_query(cq.id, "Please join the required channels first.")
         return
@@ -633,6 +634,7 @@ async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
         except Exception:
             pass
     else:
+        invalidate_member_cache(user_id)
         if not await is_user_member(user_id):
             kb = InlineKeyboardMarkup(row_width=1)
             for channel in REQUIRED_CHANNELS:
@@ -753,6 +755,7 @@ async def handle_start(message: types.Message):
                 (user_id,)
             )
 
+        invalidate_member_cache(user_id)
         if not await is_user_member(user_id):
             await send_sticker_safe(bot, message.chat.id, delay=3)
             kb = InlineKeyboardMarkup(row_width=1)

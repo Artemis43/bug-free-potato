@@ -6,7 +6,7 @@ from aiogram.types import ParseMode
 from aiogram.utils.exceptions import MessageNotModified
 from config import REQUIRED_CHANNELS, PREMIUM_INFO_URL, ADMIN_CONTACT, PAYMENT_MODE
 from utils.helpers import notify_admin_for_approval, notify_admin_for_approval_again, esc
-from middlewares.authorization import is_private_chat, is_user_member
+from middlewares.authorization import is_private_chat, is_user_member, invalidate_member_cache
 from utils.database import db_fetchone, db_fetchall, db_execute
 
 
@@ -223,6 +223,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
             )
             return False
 
+    invalidate_member_cache(user_id)
     if not await is_user_member(user_id):
         await overlay("Please join our required channels first, then try again.")
         return False

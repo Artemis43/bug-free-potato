@@ -1,7 +1,7 @@
 from config import REQUIRED_CHANNELS, PREMIUM_INFO_URL, ADMIN_CONTACT, VERIFY_URL, PAYMENT_MODE
 from aiogram import types
 from aiogram.types import ParseMode
-from middlewares.authorization import is_private_chat, is_user_member
+from middlewares.authorization import is_private_chat, is_user_member, invalidate_member_cache
 from utils.database import db_fetchone
 
 
@@ -62,6 +62,7 @@ async def help(message: types.Message):
         await message.reply("You haven't been approved yet. You'll be notified once an admin reviews your request.")
         return
 
+    invalidate_member_cache(user_id)
     if not await is_user_member(user_id):
         await message.reply("Please join our required channels first. Send /start for details.")
         return
@@ -80,6 +81,7 @@ async def about(message: types.Message):
         await message.reply("You haven't been approved yet.")
         return
 
+    invalidate_member_cache(user_id)
     if not await is_user_member(user_id):
         await message.reply("Please join our required channels first. Send /start for details.")
         return
