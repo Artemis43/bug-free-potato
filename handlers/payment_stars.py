@@ -130,6 +130,34 @@ async def send_folder_invoice(bot, user_id: int, folder_id: int) -> None:
             pass
 
 
+async def create_folder_invoice_link(bot, folder_id: int) -> str | None:
+    """Create a Telegram Stars invoice link for a paid folder."""
+    folder_row = db_fetchone(
+        "SELECT name, admin_approval FROM folders WHERE id = %s", (folder_id,)
+    )
+    if not folder_row:
+        return None
+    folder_name, requires_payment = folder_row
+
+    price = get_stars_folder_price(folder_id)
+    if price is None:
+        price = default_stars_folder_price()
+
+    try:
+        link = await bot.create_invoice_link(
+            title=f"💰 {folder_name}",
+            description=f"One-time access to '{folder_name}'. Download once after payment.",
+            payload=f"folder:{folder_id}",
+            provider_token="",
+            currency=_CURRENCY,
+            prices=[LabeledPrice(label=folder_name, amount=price)],
+        )
+        return link
+    except Exception as e:
+        log.error(f"[Stars] Failed to create folder invoice link: {e}")
+        return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # /pay — Stars plan picker (shared with payment.py routing)
 # ─────────────────────────────────────────────────────────────────────────────

@@ -58,20 +58,24 @@ async def send_ui(chat_id: int, message_id: int = None,
     premium_expiration = user_data[1] if is_premium_user else None
 
     # ── Header ────────────────────────────────────────────────────────────────
-    greeting = f"Welcome back, {chat_name}! 👋" if is_returning else f"Hey {chat_name}! 👋"
-    text  = f"{greeting}\n\n"
-    text += "<b>Medical Content Bot</b> ✨  •  /about  •  /help\n\n"
+    greeting = f"<b>{chat_name}</b>"
+    text = (
+        f"👋 Welcome, {greeting}!\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🏥 <b>Medical Content Bot</b> ✨\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
 
     if is_premium_user and premium_expiration:
         exp = premium_expiration
         if hasattr(exp, 'tzinfo') and exp.tzinfo:
             exp = exp.replace(tzinfo=None)
         days_left = (exp - datetime.now()).days
-        text += f"⭐ <b>Premium User</b> — {days_left} day(s) remaining\n\n"
+        text += f"⭐ <b>Premium Access Active</b>\n🕒 Expires in: <code>{days_left} day(s)</code>\n\n"
     elif is_premium_user:
-        text += "⭐ <b>Premium User</b>\n\n"
+        text += "⭐ <b>Premium Access Active</b>\n🕒 Lifetime access\n\n"
     else:
-        text += "🌟 Not premium yet — tap below for info\n\n"
+        text += "🔓 <b>Free Tier Active</b>\n💡 Upgrade to Premium for max download speed & no cooldowns.\n\n"
 
     # ── Fetch all folders ─────────────────────────────────────────────────────
     all_folders = db_fetchall(
@@ -107,24 +111,24 @@ async def send_ui(chat_id: int, message_id: int = None,
         page        = max(0, min(page, total_pages - 1))
         page_folders = all_folders[page * _PAGE_SIZE:(page + 1) * _PAGE_SIZE]
 
-        text += f"📂 <b>Folders</b> (page {page + 1}/{total_pages}) — tap to download:\n"
-        text += "───────────────\n\n"
+        text += f"📂 <b>Available Folders</b> (page {page + 1}/{total_pages}):\n"
+        text += "━━━━━━━━━━━━━━━━━━━━\n"
 
         folder_buttons = []
         for folder_id, folder_name, premium, admin_approval, file_count in page_folders:
             safe_name = esc(folder_name)
 
             if not is_premium_user and premium:
-                tag      = " ⭐"
+                tag      = " [⭐ Premium]"
                 btn_icon = "⭐"
             elif admin_approval:
-                tag      = " 💰"
+                tag      = " [💰 Paid]"
                 btn_icon = "💰"
             else:
                 tag      = ""
-                btn_icon = "📒"
+                btn_icon = "📁"
 
-            text += f"  <code>{safe_name}</code>{tag} — <i>{file_count} files</i>\n"
+            text += f"• <code>{safe_name}</code>{tag} — <i>{file_count} files</i>\n"
 
             label = f"{btn_icon} {folder_name}"
             if len(label) > 32:
@@ -133,7 +137,7 @@ async def send_ui(chat_id: int, message_id: int = None,
                 InlineKeyboardButton(label, callback_data=f"dl:{folder_id}")
             )
 
-        text += "\n───────────────\n"
+        text += "━━━━━━━━━━━━━━━━━━━━\n"
 
         # Folder buttons (2 per row)
         for i in range(0, len(folder_buttons), 2):
@@ -148,16 +152,15 @@ async def send_ui(chat_id: int, message_id: int = None,
             nav_buttons.append(InlineKeyboardButton("Next ▶", callback_data=f"pg:{page + 1}"))
         keyboard.row(*nav_buttons)
 
-        # Info / contact buttons (always shown at the bottom)
+        # Info / contact buttons
         if not is_premium_user:
-            keyboard.row(
-                InlineKeyboardButton("💳 Get Premium",   callback_data="info_premium"),
-                InlineKeyboardButton("💬 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"),
-            )
-        else:
-            keyboard.row(
-                InlineKeyboardButton("💬 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"),
-            )
+            keyboard.row(InlineKeyboardButton("⭐ Get Premium", callback_data="info_premium"))
+
+        keyboard.row(
+            InlineKeyboardButton("📖 About Us", callback_data="info_about"),
+            InlineKeyboardButton("❓ Help Guide", callback_data="info_help")
+        )
+        keyboard.row(InlineKeyboardButton("💬 Contact Support", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
 
 
     try:
@@ -566,6 +569,34 @@ async def _cb_info_verify(cq: types.CallbackQuery, bot, user_id: int) -> None:
         pass
 
 
+async def _cb_info_about(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    await bot.answer_callback_query(cq.id)
+    from handlers.about_help import get_about_content
+    kb = InlineKeyboardMarkup()
+    kb.row(InlineKeyboardButton("◀ Back", callback_data="back_to_main"))
+    try:
+        await bot.edit_message_text(
+            chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+            text=get_about_content(), parse_mode=ParseMode.HTML, reply_markup=kb
+        )
+    except Exception:
+        pass
+
+
+async def _cb_info_help(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    await bot.answer_callback_query(cq.id)
+    from handlers.about_help import get_help_content
+    kb = InlineKeyboardMarkup()
+    kb.row(InlineKeyboardButton("◀ Back", callback_data="back_to_main"))
+    try:
+        await bot.edit_message_text(
+            chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+            text=get_help_content(), parse_mode=ParseMode.HTML, reply_markup=kb
+        )
+    except Exception:
+        pass
+
+
 async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
     await bot.answer_callback_query(cq.id)
 
@@ -628,6 +659,8 @@ _CB_HANDLERS = {
     "stars_cancel": _cb_stars_cancel,
     "info_premium": _cb_info_premium,
     "info_verify":  _cb_info_verify,
+    "info_about":   _cb_info_about,
+    "info_help":    _cb_info_help,
     "close_info":   _cb_back_to_main,
     "back_to_main": _cb_back_to_main,
 }

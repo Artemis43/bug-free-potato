@@ -66,7 +66,10 @@ async def status(message: types.Message):
     elif is_premium:
         premium_line = "⭐ Premium (no expiry set)"
     else:
-        premium_line = f'🔓 Free User  <a href="{PREMIUM_INFO_URL}">🌟 Upgrade</a>'
+        if PAYMENT_MODE in ('stars', 'razorpay'):
+            premium_line = '🔓 Free User  •  /pay'
+        else:
+            premium_line = f'🔓 Free User  •  <a href="{PREMIUM_INFO_URL}">🌟 Upgrade</a>'
 
     lines.append(premium_line)
     lines.append("")

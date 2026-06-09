@@ -4,7 +4,7 @@ import logging
 from aiogram import types, exceptions
 from aiogram.types import ParseMode
 from aiogram.utils.exceptions import MessageNotModified
-from config import REQUIRED_CHANNELS, PREMIUM_INFO_URL, ADMIN_CONTACT
+from config import REQUIRED_CHANNELS, PREMIUM_INFO_URL, ADMIN_CONTACT, PAYMENT_MODE
 from utils.helpers import notify_admin_for_approval, notify_admin_for_approval_again, esc
 from middlewares.authorization import is_private_chat, is_user_member
 from utils.database import db_fetchone, db_fetchall, db_execute
@@ -51,10 +51,13 @@ async def _run_download(bot, chat_id: int, user_id: int,
 
     tier     = "Premium" if is_premium else "Free"
     tier_ico = "🎉" if is_premium else "🔓"
-    upsell   = (
-        f'\n\n💡 <a href="{PREMIUM_INFO_URL}">Upgrade to Premium</a> for 5s intervals'
-        if not is_premium else ""
-    )
+    if not is_premium:
+        if PAYMENT_MODE in ('stars', 'razorpay'):
+            upsell = '\n\n💡 Use /pay to upgrade to Premium for 5s intervals'
+        else:
+            upsell = f'\n\n💡 <a href="{PREMIUM_INFO_URL}">Upgrade to Premium</a> for 5s intervals'
+    else:
+        upsell = ""
 
     info_text = (
         f"{tier_ico} <b>{tier} Download</b>\n\n"
@@ -269,6 +272,18 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                 f"💬 Contact Admin",
                 url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"
             )]
+
+        await overlay(
+            f"⭐ <b>Premium Folder: {esc(folder_name)}</b>\n"
+            + "━" * 22 + "\n\n"
+            "This folder contains premium medical content.\n"
+            "Upgrade to premium to access this and all other premium folders.\n\n"
+            "<i>Tap ◀ Back to return to the folder list.</i>",
+            parse_mode=PM.HTML,
+            extra_buttons=extra
+        )
+        return False
+
     if requires_admin_approval:
         approval = db_fetchone(
             'SELECT approved, download_completed FROM user_folder_approval WHERE user_id = %s AND folder_id = %s',
@@ -279,22 +294,37 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
             if _PM == 'stars':
                 # -- Telegram Stars automated payment ---------------------------------
                 from handlers.payment_stars import (
-                    get_stars_folder_price, default_stars_folder_price, send_folder_invoice
+                    get_stars_folder_price, default_stars_folder_price, create_folder_invoice_link
                 )
                 from main import bot as _bot
                 price = get_stars_folder_price(folder_id)
                 if price is None:
                     price = default_stars_folder_price()
-                await overlay(
-                    f"💰 <b>Paid Folder: {esc(folder_name)}</b>\n"
-                    + "\u2501" * 22 + "\n\n"
-                    f"One-time purchase \u2192 <b>1 download</b> at Premium speed.\n"
-                    f"Price: <b>{price} ⭐ Stars</b>\n\n"
-                    f"✅ Access is <b>granted instantly</b> after Stars payment.\n\n"
-                    "<i>A Stars payment request will be sent to you.</i>",
-                    parse_mode=PM.HTML,
-                )
-                await send_folder_invoice(_bot, user_id, folder_id)
+                
+                invoice_url = await create_folder_invoice_link(_bot, folder_id)
+                if invoice_url:
+                    await overlay(
+                        f"💰 <b>Paid Folder: {esc(folder_name)}</b>\n"
+                        + "\u2501" * 22 + "\n\n"
+                        f"One-time purchase \u2192 <b>1 download</b> at Premium speed.\n"
+                        f"Price: <b>{price} ⭐ Stars</b>\n\n"
+                        f"✅ Access is <b>granted instantly</b> after Stars payment.\n\n"
+                        f"<i>Tap ◀ Back to return to the folder list.</i>",
+                        parse_mode=PM.HTML,
+                        extra_buttons=[
+                            InlineKeyboardButton(
+                                f"⭐ Pay {price} Stars", url=invoice_url
+                            )
+                        ]
+                    )
+                else:
+                    await overlay(
+                        f"💰 <b>Paid Folder</b>\n\n"
+                        f"Could not create a Stars payment link right now.\n"
+                        f"Please contact {ADMIN_CONTACT}.\n\n"
+                        f"<i>Tap ◀ Back to return.</i>",
+                        parse_mode=PM.HTML,
+                    )
 
             elif _PM == 'razorpay':
                 # -- Razorpay automated payment ----------------------------------------

@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime, timedelta
 from aiogram import types, exceptions
 from aiogram.types import ParseMode
-from config import ADMIN_IDS, PREMIUM_INFO_URL
+from config import ADMIN_IDS, PREMIUM_INFO_URL, PAYMENT_MODE
 from middlewares.authorization import is_private_chat
 from utils.database import db_fetchone, db_execute
 from utils.helpers import esc
@@ -129,12 +129,13 @@ async def set_premium(message: types.Message):
         await message.reply(
             f"✅ User <code>{user_id}</code> premium revoked.", parse_mode=ParseMode.HTML
         )
+        upgrade_text = 'Use /pay to upgrade again.' if PAYMENT_MODE in ('stars', 'razorpay') else f'<a href="{PREMIUM_INFO_URL}">Upgrade again →</a>'
         try:
             await bot.send_message(
                 user_id,
                 f"Your Premium membership has ended.\n\n"
                 f"You can still use the bot as a free user.\n"
-                f'<a href="{PREMIUM_INFO_URL}">Upgrade again →</a>',
+                f"{upgrade_text}",
                 parse_mode=ParseMode.HTML
             )
         except exceptions.BotBlocked:
@@ -155,12 +156,13 @@ async def remove_premium_after_expiry(user_id: int, expiration_date: datetime):
         ''',
         (user_id, datetime.now())
     )
+    renew_text = 'Use /pay to renew Premium.' if PAYMENT_MODE in ('stars', 'razorpay') else f'<a href="{PREMIUM_INFO_URL}">Renew Premium →</a>'
     try:
         await bot.send_message(
             user_id,
             f"⏰ <b>Your Premium has expired.</b>\n\n"
             f"You can still use the bot as a free user.\n"
-            f'<a href="{PREMIUM_INFO_URL}">Renew Premium →</a>',
+            f"{renew_text}",
             parse_mode=ParseMode.HTML
         )
     except exceptions.BotBlocked:
