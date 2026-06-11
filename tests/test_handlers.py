@@ -31,8 +31,7 @@ def _make_message(
     msg.from_user.username = username
     msg.from_user.first_name = first_name
     msg.chat.id            = user_id
-    msg.chat.type          = MagicMock()
-    msg.chat.type.value    = chat_type
+    msg.chat.type          = chat_type
     msg.text               = text
     msg.reply              = AsyncMock()
     msg.answer             = AsyncMock()
@@ -50,8 +49,7 @@ def _make_callback(
     cq.from_user.username  = "testuser"
     cq.data                = data
     cq.message.chat.id     = user_id
-    cq.message.chat.type   = MagicMock()
-    cq.message.chat.type.value = chat_type
+    cq.message.chat.type   = chat_type
     cq.message.message_id  = 42
     cq.answer              = AsyncMock()
     cq.message.answer      = AsyncMock()

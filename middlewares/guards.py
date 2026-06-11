@@ -32,7 +32,7 @@ def private_only(fn):
     """Only allow messages from private chats."""
     @functools.wraps(fn)
     async def wrapper(message: Message, *args, **kwargs):
-        if message.chat.type.value != 'private':
+        if message.chat.type != 'private':
             return
         return await fn(message, *args, **kwargs)
     return wrapper

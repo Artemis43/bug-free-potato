@@ -158,6 +158,8 @@ from utils.webhook import on_startup, on_shutdown
 async def main() -> None:
     await on_startup(bot)
     try:
+        # Clear any active webhook so long polling can start without conflict
+        await bot.delete_webhook(drop_pending_updates=False)
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         await on_shutdown(bot)

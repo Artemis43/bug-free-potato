@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 # ── is_private_chat ────────────────────────────────────────────────────────
 
 def is_private_chat(message: Message) -> bool:
-    return message.chat.type.value == 'private'
+    return message.chat.type == 'private'
 
 
 # ── is_user_member with 60-second TTL cache ───────────────────────────────
@@ -42,7 +42,7 @@ async def is_user_member(user_id: int) -> bool:
     for channel in REQUIRED_CHANNELS:
         try:
             member = await bot.get_chat_member(channel, user_id)
-            if member.status.value not in ('member', 'administrator', 'creator'):
+            if member.status not in ('member', 'administrator', 'creator'):
                 result = False
                 break
         except Exception as e:
