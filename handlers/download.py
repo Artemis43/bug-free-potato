@@ -1,27 +1,27 @@
-from utils.keyboard import InlineBuilder
-from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
-from aiogram import Router
-from aiogram.enums import ParseMode
-from utils.bot_ref import get_bot
-from datetime import datetime, timedelta
 import asyncio
 import logging
-from aiogram import types
-from aiogram import Router
-from aiogram.enums import ParseMode
-from aiogram.enums import ChatAction
-from aiogram import Router
-from aiogram.enums import ParseMode
+from datetime import datetime, timedelta
+
+from aiogram import Router, types
+from aiogram.enums import ChatAction, ParseMode
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.exceptions import TelegramBadRequest as MessageNotModified
-from aiogram import Router
-from aiogram.enums import ParseMode
-from config import REQUIRED_CHANNELS, PREMIUM_INFO_URL, ADMIN_CONTACT, PAYMENT_MODE
-from utils.helpers import notify_admin_for_approval, notify_admin_for_approval_again, esc
-from middlewares.authorization import is_private_chat, is_user_member, invalidate_member_cache
-from utils.database import db_fetchone, db_fetchall, db_execute
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+from config import ADMIN_CONTACT, PAYMENT_MODE, PREMIUM_INFO_URL, REQUIRED_CHANNELS
+from middlewares.authorization import (
+    invalidate_member_cache,
+    is_private_chat,
+    is_user_member,
+)
+from utils.bot_ref import get_bot
+from utils.database import db_execute, db_fetchall, db_fetchone
+from utils.helpers import esc, notify_admin_for_approval, notify_admin_for_approval_again
+from utils.keyboard import InlineBuilder
 import utils.progress as progress
 
 log = logging.getLogger(__name__)
+router = Router()
 async def _run_download(
     bot, chat_id: int, user_id: int,
     folder_id: int, folder_name: str,
@@ -265,7 +265,6 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
     (editing the main message) rather than new messages, so the user never leaves
     their current context.  The callback toast is only fired on success.
     """
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton as PM
 
     async def overlay(text: str, *, parse_mode=None, extra_buttons=None):
         """Show gate message: overlay on the UI message, or fall back to reply_fn."""
@@ -320,7 +319,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                 f"\u23f3 <b>Cooldown active</b>\n\n"
                 f"Please wait <b>{mins}m {secs}s</b> before your next download.\n\n"
                 f"<i>Tap 🔙 Back to Menu to return to the folder list.</i>",
-                parse_mode=PM.HTML
+                parse_mode=ParseMode.HTML
             )
             return False
 
@@ -380,7 +379,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
             "This folder contains premium medical content.\n"
             "Upgrade to premium to access this and all other premium folders.\n\n"
             "<i>Tap 🔙 Back to Menu to return to the folder list.</i>",
-            parse_mode=PM.HTML,
+            parse_mode=ParseMode.HTML,
             extra_buttons=extra
         )
         return False
@@ -409,7 +408,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                         f"Price: <b>{price} ⭐ Stars</b>\n\n"
                         f"✅ Access is <b>granted instantly</b> after Stars payment.\n\n"
                         f"<i>Tap 🔙 Back to Menu to return to the folder list.</i>",
-                        parse_mode=PM.HTML,
+                        parse_mode=ParseMode.HTML,
                         extra_buttons=[
                             InlineKeyboardButton(
                                 f"⭐ Pay {price} Stars", url=invoice_url
@@ -422,7 +421,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                         f"Could not create a Stars payment link right now.\n"
                         f"Please contact {ADMIN_CONTACT}.\n\n"
                         f"<i>Tap 🔙 Back to Menu to return.</i>",
-                        parse_mode=PM.HTML,
+                        parse_mode=ParseMode.HTML,
                     )
 
             elif _PM == 'razorpay':
@@ -461,7 +460,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                         f"Price: <b>{_fmt_inr(price)}</b>\n\n"
                         f"✅ Access is <b>granted instantly</b> after payment.\n\n"
                         f"<i>Tap 🔙 Back to Menu to return to the folder list.</i>",
-                        parse_mode=PM.HTML,
+                        parse_mode=ParseMode.HTML,
                         extra_buttons=[
                             InlineKeyboardButton(
                                 f"💳 Pay {_fmt_inr(price)}", url=payment_url
@@ -477,7 +476,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                         f"Could not create a payment link right now.\n"
                         f"Please contact {ADMIN_CONTACT}.\n\n"
                         f"<i>Tap 🔙 Back to Menu to return.</i>",
-                        parse_mode=PM.HTML,
+                        parse_mode=ParseMode.HTML,
                     )
 
             else:
@@ -488,7 +487,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                     "An admin will review it and notify you here.\n"
                     "This usually takes a few hours.\n\n"
                     f"<i>Tap 🔙 Back to Menu to return to the folder list.</i>",
-                    parse_mode=PM.HTML,
+                    parse_mode=ParseMode.HTML,
                 )
             return False
         if approval[1]:  # download_completed
@@ -498,7 +497,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                 f"You've already downloaded this folder once.\n"
                 f"Contact {ADMIN_CONTACT} to request another download.\n\n"
                 "<i>Tap 🔙 Back to Menu to return.</i>",
-                parse_mode=PM.HTML
+                parse_mode=ParseMode.HTML
             )
             return False
 

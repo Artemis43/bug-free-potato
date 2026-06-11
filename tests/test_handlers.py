@@ -326,3 +326,16 @@ class TestProgressIntegration:
 
         p.finish_download(chat_id)
         assert not p.is_downloading(chat_id)
+
+
+# ── Registry Integration ───────────────────────────────────────────────────
+
+class TestHandlerRegistry:
+    def test_register_all_handlers_runs_without_error(self):
+        """Verify that register_all_handlers imports all modules and registers correctly."""
+        from utils.register_handlers import register_all_handlers
+        try:
+            register_all_handlers()
+        except Exception as e:
+            pytest.fail(f"register_all_handlers() failed with exception: {e}")
+
