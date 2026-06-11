@@ -83,16 +83,20 @@ async def stats(message: types.Message):
         # ── Compose the dashboard ─────────────────────────────────────────
         lines = [
             "📊 <b>Bot Analytics Dashboard</b>",
-            "═══════════════════════════",
+            "══════════════════",
             "",
             "👥 <b>Users</b>",
             f"  Total:      <b>{total_users}</b>",
-            f"  Approved:   <b>{approved_users}</b>  |  Pending: <b>{pending_users}</b>  |  Rejected: {rejected_users}",
+            f"  Approved:   <b>{approved_users}</b>",
+            f"  Pending:    <b>{pending_users}</b>",
+            f"  Rejected:   {rejected_users}",
             f"  Premium:    <b>{premium_users}</b>",
-            f"  New today:  <b>{new_today}</b>  |  This week: <b>{new_week}</b>",
+            f"  New today:  <b>{new_today}</b>",
+            f"  This week:  <b>{new_week}</b>",
             "",
             "📂 <b>Content</b>",
-            f"  Folders:    <b>{total_folders}</b>  (⭐ {premium_folders} premium  |  💰 {paid_folders} paid)",
+            f"  Folders:    <b>{total_folders}</b>",
+            f"    ⭐ {premium_folders} premium · 💰 {paid_folders} paid",
             f"  Files:      <b>{total_files}</b>",
             f"  Downloads:  <b>{total_dl_count}</b>  total",
         ]
@@ -114,7 +118,7 @@ async def stats(message: types.Message):
 
         lines += [
             "",
-            "═══════════════════════════",
+            "══════════════════",
             f"<i>Generated: {datetime.now().strftime('%d %b %Y at %H:%M')}</i>",
         ]
 

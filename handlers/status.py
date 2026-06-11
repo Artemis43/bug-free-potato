@@ -41,11 +41,11 @@ async def build_status_text(user_id: int, bot=None) -> Tuple[str, Optional[Inlin
 
     lines = [
         "👤 <b>Account Status</b>",
-        "─────────────────────────",
+        "──────────────────",
         f"<b>Name:</b>     {display_name}",
         f"<b>Username:</b> {uname_str}",
         f"<b>User ID:</b>  <code>{user_id}</code>",
-        "─────────────────────────",
+        "──────────────────",
     ]
 
     status_map = {
@@ -89,7 +89,7 @@ async def build_status_text(user_id: int, bot=None) -> Tuple[str, Optional[Inlin
             )
 
     lines.append(f"<b>Plan:</b>     {premium_line}")
-    lines.append("─────────────────────────")
+    lines.append("──────────────────")
 
     # ── Cooldown ──────────────────────────────────────────────────────────
     cooldown_mins = 2 if is_premium else 7
@@ -114,7 +114,7 @@ async def build_status_text(user_id: int, bot=None) -> Tuple[str, Optional[Inlin
         lines.append("✅ <b>Cooldown:</b> Ready — no downloads yet!")
 
     # ── Speed summary ─────────────────────────────────────────────────────
-    lines.append("─────────────────────────")
+    lines.append("──────────────────")
     tier = "⭐ Premium" if is_premium else "👤 Free"
     lines.append(
         f"⚡ <b>Your speed ({tier}):</b>\n"

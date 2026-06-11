@@ -43,9 +43,7 @@ def get_help_content() -> str:
     return (
         "🏥 <b>How to Use the Medical Content Bot</b>\n\n"
 
-        "╔══════════════════════════════╗\n"
-        "║  📂  <b>Downloading Files</b>        ║\n"
-        "╚══════════════════════════════╝\n\n"
+        "📂 <b>Downloading Files</b>\n\n"
 
         "📌 <b>Method 1 — Tap a folder button (easiest!)</b>\n"
         "Send /start → tap any 📁 folder → files arrive automatically.\n\n"
@@ -53,19 +51,23 @@ def get_help_content() -> str:
         "⌨️ <b>Method 2 — Type a command</b>\n"
         "<code>/download &lt;folder name&gt;</code>  — download a specific folder.\n\n"
 
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
 
         "⏱️ <b>Cooldown & Speed</b>\n\n"
-        "  👤 <b>Free</b>        — 60s between files · 7 min between downloads\n"
-        "  ⭐ <b>Premium</b>  — 5s between files · 2 min between downloads\n\n"
+        "  👤 <b>Free</b>\n"
+        "     60s between files\n"
+        "     7 min between downloads\n\n"
+        "  ⭐ <b>Premium</b>\n"
+        "     5s between files\n"
+        "     2 min between downloads\n\n"
 
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
 
         "⚠️ <b>Important</b>\n"
         "Files are deleted from chat after a few minutes to respect copyright.\n"
         "💾 <b>Forward them to your Saved Messages immediately!</b>\n\n"
 
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
         f"{upgrade_line}\n\n"
         "👤 Check your account status: /status"
     )
@@ -80,17 +82,17 @@ def get_about_content() -> str:
         "Your personal study companion on Telegram — organising and delivering "
         "medical content directly to verified students.\n\n"
 
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
 
         "🔐 <b>Why verification?</b>\n"
         "Access is limited to verified medical students to protect content creators "
         "and avoid copyright issues. By verifying, you help keep this resource alive "
         "for everyone. 🙏\n\n"
 
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
         f"{upgrade_line}\n\n"
 
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
         "🛟 <b>Support or questions?</b>\n"
         f"Reach us at: {ADMIN_CONTACT}\n\n"
         "Good luck with your studies! 📚✨"
