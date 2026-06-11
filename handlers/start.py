@@ -840,7 +840,7 @@ async def handle_start(message: types.Message):
                 f"🎉 <b>Welcome, {name}! You're approved!</b>\n\n"
                 "Here's what you can do:\n\n"
                 "📂 <b>Browse Folders</b> — tap any folder button to download all its files\n"
-                "⬇️ <b>/download \u003cfolder name\u003e</b> — download by typing the name\n"
+                "⬇️ <b>/download</b> <code>&lt;folder name&gt;</code> — download by typing the name\n"
                 "👤 <b>/status</b> — check your account & cooldown\n"
                 "❓ <b>/help</b> — full usage guide\n\n"
                 "💾 <b>Tip:</b> Forward received files to your <b>Saved Messages</b> — "
