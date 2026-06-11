@@ -7,7 +7,8 @@ import logging
 from aiogram import types
 from aiogram import Router
 from aiogram.enums import ParseMode
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup
+from utils.keyboard import IKB as InlineKeyboardButton
 from middlewares.authorization import is_private_chat, is_user_member, invalidate_member_cache
 from utils.database import db_fetchone
 from utils.keyboard import InlineBuilder

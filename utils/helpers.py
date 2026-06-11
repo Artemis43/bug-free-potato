@@ -1,4 +1,5 @@
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from aiogram.enums import ParseMode
 from utils.bot_ref import get_bot
 import html as _html
 import logging
@@ -74,15 +75,15 @@ async def notify_admins(user_id: int, username: str, first_name: str = None):
     )
 
     # Inline approve / reject buttons on the notification itself
-    kb = InlineKeyboardMarkup()
-    kb.row(
-        InlineKeyboardButton("✅ Approve", callback_data=f"approve:{user_id}"),
-        InlineKeyboardButton("❌ Reject",  callback_data=f"reject:{user_id}"),
-    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Approve", callback_data=f"approve:{user_id}"),
+        InlineKeyboardButton(text="❌ Reject",  callback_data=f"reject:{user_id}"),
+    ]])
 
     # Send to group if configured, otherwise DM the first admin
     target = ADMIN_GROUP_ID if ADMIN_GROUP_ID else ADMIN_IDS[0]
 
+    bot = get_bot()
     try:
         await bot.send_message(target, text, parse_mode=ParseMode.HTML, reply_markup=kb)
     except TelegramForbiddenError:
@@ -110,13 +111,13 @@ async def notify_admin_for_approval(user_id: int, folder_id: int, folder_name: s
     name_str  = esc(row[0] if row and row[0] else f'User {user_id}')
     uname_str = f"@{esc(row[1])}" if row and row[1] else 'no username'
 
-    kb = InlineKeyboardMarkup()
-    kb.row(
-        InlineKeyboardButton("✅ Approve", callback_data=f"papprove:{user_id}:{folder_id}"),
-        InlineKeyboardButton("❌ Reject",  callback_data=f"preject:{user_id}:{folder_id}"),
-    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Approve", callback_data=f"papprove:{user_id}:{folder_id}"),
+        InlineKeyboardButton(text="❌ Reject",  callback_data=f"preject:{user_id}:{folder_id}"),
+    ]])
 
     target = ADMIN_GROUP_ID if ADMIN_GROUP_ID else ADMIN_IDS[0]
+    bot = get_bot()
     try:
         await bot.send_message(
             target,
@@ -148,13 +149,13 @@ async def notify_admin_for_approval_again(user_id: int, folder_id: int, folder_n
     name_str  = esc(row[0] if row and row[0] else f'User {user_id}')
     uname_str = f"@{esc(row[1])}" if row and row[1] else 'no username'
 
-    kb = InlineKeyboardMarkup()
-    kb.row(
-        InlineKeyboardButton("✅ Approve Again", callback_data=f"papprove:{user_id}:{folder_id}"),
-        InlineKeyboardButton("❌ Reject",        callback_data=f"preject:{user_id}:{folder_id}"),
-    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Approve Again", callback_data=f"papprove:{user_id}:{folder_id}"),
+        InlineKeyboardButton(text="❌ Reject",        callback_data=f"preject:{user_id}:{folder_id}"),
+    ]])
 
     target = ADMIN_GROUP_ID if ADMIN_GROUP_ID else ADMIN_IDS[0]
+    bot = get_bot()
     try:
         await bot.send_message(
             target,

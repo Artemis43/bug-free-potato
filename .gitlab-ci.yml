@@ -1,0 +1,37 @@
+# CI pipeline for the Telegram bot.
+#
+# The test suite is fully self-contained: tests/conftest.py injects fake
+# env vars (API_TOKEN, ADMINS, DB_STRING, PAYMENT_MODE=manual, ...) and the
+# tests mock the database and Telegram API, so no real Postgres instance or
+# bot token is required.
+
+stages:
+  - test
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip-cache"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+pytest:
+  stage: test
+  image: python:3.12-slim
+  cache:
+    key:
+      files:
+        - requirements.txt
+    paths:
+      - .pip-cache
+  before_script:
+    - python --version
+    - pip install -r requirements.txt
+  script:
+    - pytest -v
+  rules:
+    # Run for merge requests...
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # ...always on the default branch...
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    # ...and on any branch push that does NOT already have an open MR
+    # (prevents a duplicate branch pipeline running alongside the MR pipeline).
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS == null'

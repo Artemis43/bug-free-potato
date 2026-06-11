@@ -100,7 +100,11 @@ def _process_premium_payment(user_id: int, plan_id: int,
         return
 
     plan_name, amount_paise, days = plan
-    expiration_date = datetime.utcnow() + timedelta(days=days)
+    # NOTE: use naive local datetime.now() (NOT utcnow()) to stay consistent
+    # with the bot, which writes premium_expiration with datetime.now() and
+    # compares it against datetime.now() everywhere. Mixing utcnow() here would
+    # skew the premium duration by the host's UTC offset.
+    expiration_date = datetime.now() + timedelta(days=days)
     user_info = db.get_user_info(user_id)
 
     # 1. Mark order paid (idempotent UPDATE)

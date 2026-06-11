@@ -25,7 +25,8 @@ from datetime import datetime, timedelta
 import razorpay
 from aiogram import types
 from aiogram.enums import ParseMode
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup
+from utils.keyboard import IKB as InlineKeyboardButton
 
 from config import ADMIN_IDS, ADMIN_CONTACT, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, ADMIN_GROUP_ID, PAYMENT_MODE
 from middlewares.authorization import is_private_chat
@@ -347,6 +348,7 @@ async def _create_folder_link(reply_fn, user_id: int, folder_id: int):
 
 async def handle_pay_callback(callback_query: types.CallbackQuery):
     """Dispatched from start.process_callback for pay_plan: and pay_cancel data."""
+    bot = get_bot()
     data = callback_query.data or ""
     user_id = callback_query.from_user.id
 
@@ -428,6 +430,7 @@ async def _activate_premium(user_id: int, plan_id: int, razorpay_payment_id: str
         return
 
     name, amount_paise, days = plan
+    bot = get_bot()
 
     # Extend from current expiry if user already has active premium (don't truncate)
     current_exp_row = db_fetchone(
@@ -497,6 +500,7 @@ async def _activate_premium(user_id: int, plan_id: int, razorpay_payment_id: str
 
 async def _handle_folder_payment(user_id: int, folder_id: int, razorpay_payment_id: str):
     """After payment for a paid folder: auto-approve access and notify user."""
+    bot = get_bot()
     db_execute(
         "UPDATE payment_orders SET status = 'paid', paid_at = NOW(), razorpay_payment_id = %s "
         "WHERE razorpay_payment_id = %s OR (user_id = %s AND order_type = 'folder' AND ref_id = %s AND status = 'created')",

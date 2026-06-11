@@ -99,6 +99,7 @@ async def set_premium(message: types.Message):
         )
         return
 
+    bot = get_bot()
     if action == 'on':
         expiration_date = datetime.now() + timedelta(days=days)
         db_execute(
@@ -150,6 +151,7 @@ async def set_premium(message: types.Message):
 
 async def remove_premium_after_expiry(user_id: int, expiration_date: datetime):
     """Background task: auto-expire premium at the scheduled time."""
+    bot = get_bot()
     sleep_time = max((expiration_date - datetime.now()).total_seconds(), 0)
     await asyncio.sleep(sleep_time)
 

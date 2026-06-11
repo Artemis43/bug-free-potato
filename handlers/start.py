@@ -1,13 +1,13 @@
 from utils.keyboard import InlineBuilder
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from aiogram import Router
+from aiogram.enums import ParseMode, ChatAction
 from utils.bot_ref import get_bot
 import asyncio
 import logging
 from aiogram import types
-from aiogram import Router
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram import Router
+from aiogram.types import InlineKeyboardMarkup
+from utils.keyboard import IKB as InlineKeyboardButton
 from middlewares.authorization import is_private_chat, is_user_member, get_channel_title, invalidate_member_cache
 from utils.database import add_user_to_db, db_fetchone, db_execute, db_fetchall
 from utils.helpers import notify_admins, esc
@@ -41,7 +41,7 @@ async def send_sticker_safe(bot, chat_id: int, delay: float = 2.0):
         await asyncio.sleep(delay)
         await bot.delete_message(chat_id, msg.message_id)
         return msg
-    except exceptions.BadRequest as e:
+    except TelegramBadRequest as e:
         logging.warning(f"Sticker send failed (bad file_id?): {e}")
     except Exception as e:
         logging.warning(f"Sticker send failed: {e}")
@@ -56,6 +56,7 @@ async def send_ui(chat_id: int, message_id: int = None,
                   is_returning: bool = False, page: int = 0):
     global last_sync_time
 
+    bot = get_bot()
     chat = await bot.get_chat(chat_id)
     chat_name = esc(chat.full_name or chat.username or str(chat_id))
 
@@ -736,6 +737,7 @@ _CB_HANDLERS = {
 
 async def process_callback(callback_query: types.CallbackQuery):
     """Route every inline keyboard callback via _CB_HANDLERS dict-dispatch."""
+    bot = get_bot()
     user_id = callback_query.from_user.id
     prefix  = (callback_query.data or '').split(':')[0]
     handler = _CB_HANDLERS.get(prefix)
@@ -759,6 +761,7 @@ async def handle_start(message: types.Message):
     first_name = message.from_user.first_name
     name       = esc(first_name or 'there')
 
+    bot = get_bot()
     # Show typing indicator while we process
     await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
 
@@ -893,6 +896,7 @@ async def handle_start(message: types.Message):
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def approve_user(message: types.Message):
+    bot = get_bot()
     try:
         target_id = int(message.text.split('_')[1])
     except (IndexError, ValueError):
@@ -919,6 +923,7 @@ async def approve_user(message: types.Message):
 
 
 async def reject_user(message: types.Message):
+    bot = get_bot()
     try:
         target_id = int(message.text.split('_')[1])
     except (IndexError, ValueError):

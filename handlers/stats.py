@@ -16,6 +16,7 @@ from aiogram import Router
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS
 from utils.database import db_fetchone, db_fetchall
+from utils.helpers import esc
 
 router = Router()
 
@@ -101,13 +102,13 @@ async def stats(message: types.Message):
             medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
             for i, (name, count) in enumerate(top_folders):
                 medal = medals[i] if i < len(medals) else f"{i+1}."
-                lines.append(f"  {medal} <code>{name[:30]}</code> — {count} downloads")
+                lines.append(f"  {medal} <code>{esc(name[:30])}</code> — {count} downloads")
 
         if expiring_soon:
             lines.append("\n⚠️ <b>Premium Expiring Soon (7 days)</b>")
             for fname, uname, exp in expiring_soon:
-                name_str  = fname or "Unknown"
-                uname_str = f"@{uname}" if uname else "no username"
+                name_str  = esc(fname or "Unknown")
+                uname_str = f"@{esc(uname)}" if uname else "no username"
                 exp_str   = exp.strftime('%d %b') if exp else "?"
                 lines.append(f"  • {name_str} ({uname_str}) — expires {exp_str}")
 

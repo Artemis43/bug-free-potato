@@ -180,6 +180,7 @@ async def cmd_pay_stars(message: types.Message) -> None:
         return
 
     user_id = message.from_user.id
+    bot = get_bot()
     plans = get_stars_plans()
 
     if not plans:
@@ -242,7 +243,7 @@ async def cmd_payfolder_stars(message: types.Message) -> None:
         await message.reply("Invalid folder ID.")
         return
 
-    await send_folder_invoice(bot, message.from_user.id, folder_id)
+    await send_folder_invoice(get_bot(), message.from_user.id, folder_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -251,6 +252,7 @@ async def cmd_payfolder_stars(message: types.Message) -> None:
 
 async def handle_stars_plan_callback(callback_query: types.CallbackQuery) -> None:
     """Dispatched from start._CB_HANDLERS for stars_plan: and stars_cancel."""
+    bot = get_bot()
     data = callback_query.data or ""
     user_id = callback_query.from_user.id
 
@@ -297,6 +299,7 @@ async def handle_stars_plan_callback(callback_query: types.CallbackQuery) -> Non
 
 async def pre_checkout_handler(pre_checkout_query: types.PreCheckoutQuery) -> None:
     """Validate the Stars payment before Telegram confirms it."""
+    bot = get_bot()
     payload = pre_checkout_query.invoice_payload or ""
     ok, error_msg = False, "Invalid payment."
 
@@ -336,6 +339,7 @@ async def successful_payment_handler(message: types.Message) -> None:
     from handlers.setpremium import remove_premium_after_expiry
     import asyncio
 
+    bot = get_bot()
     payment = message.successful_payment
     payload = payment.invoice_payload or ""
     user_id = message.from_user.id
@@ -412,7 +416,7 @@ async def successful_payment_handler(message: types.Message) -> None:
             pass
 
         # Notify admin
-        _notify_admin_premium(bot, user_id, name, days, stars_paid, expiration_date)
+        _notify_admin_premium(user_id, name, days, stars_paid, expiration_date)
 
     # ── Paid folder ───────────────────────────────────────────────────────────
     elif payload.startswith("folder:"):
@@ -460,12 +464,13 @@ async def successful_payment_handler(message: types.Message) -> None:
         log.warning(f"[Stars] Unknown payload: {payload!r}")
 
 
-def _notify_admin_premium(bot, user_id: int, plan_name: str, days: int,
+def _notify_admin_premium(user_id: int, plan_name: str, days: int,
                            stars_paid: int, expiration_date: datetime) -> None:
     """Fire-and-forget admin notification after Stars premium purchase."""
     import asyncio
 
     async def _send():
+        bot = get_bot()
         admin_target = ADMIN_GROUP_ID if ADMIN_GROUP_ID else (ADMIN_IDS[0] if ADMIN_IDS else None)
         if not admin_target:
             return

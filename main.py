@@ -73,11 +73,17 @@ from handlers import (
 from utils.register_handlers import register_all_handlers
 register_all_handlers()
 
+# IMPORTANT: about_help MUST be included LAST. Its router holds the catch-all
+# unknown-command handler (F.text.startswith("/")). aiogram v3 dispatches
+# routers in include order, so if about_help comes before any command router
+# (e.g. status, admin_tools, payment, stats, sync), that catch-all would
+# swallow those commands and reply "Unknown command".
 for module in (
     start, broadcast, caption, document,
     getlist, folder, download, setpremium,
-    stop, about_help, sync, status, admin_tools, commands_ref, payment,
+    stop, sync, status, admin_tools, commands_ref, payment,
     payment_stars, stats,
+    about_help,   # <-- must stay last (unknown-command fallback)
 ):
     if hasattr(module, 'router'):
         dp.include_router(module.router)

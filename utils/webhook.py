@@ -76,22 +76,18 @@ async def on_startup(bot):
     """
     Called from main.py before the bot starts polling (aiogram v3).
 
-    1. Set the Telegram webhook (if HOST_URL is configured).
-    2. Initialise / migrate the database schema.
-    3. Register BotFather command menus.
-    4. Reschedule premium-expiry background tasks for active premium users.
-    """
-    # 1. Webhook
-    if WEBHOOK_URL.startswith("https://"):
-        try:
-            await bot.set_webhook(WEBHOOK_URL)
-            log.info(f"Webhook set → {WEBHOOK_URL}")
-        except Exception as e:
-            log.error(f"Failed to set webhook: {e}")
-    else:
-        log.info("No HOST_URL configured — running in long-polling mode.")
+    1. Initialise / migrate the database schema.
+    2. Register BotFather command menus.
+    3. Reschedule premium-expiry background tasks for active premium users.
 
-    # 2. Database
+    NOTE: This bot runs in long-polling mode (see main.py). We must NOT register
+    a Telegram webhook here — doing so conflicts with getUpdates polling (HTTP
+    409). The Razorpay/Flask webhook service is a separate process and uses
+    HOST_URL independently.
+    """
+    log.info("Starting in long-polling mode (no Telegram webhook registered).")
+
+    # 1. Database
     try:
         initialize_database()
         log.info("Database initialised successfully.")
@@ -99,10 +95,10 @@ async def on_startup(bot):
         log.critical(f"Database initialisation failed: {e}")
         raise  # Cannot run without DB
 
-    # 3. BotFather command menus
+    # 2. BotFather command menus
     await _register_commands(bot)
 
-    # 4. Reschedule premium expiry tasks
+    # 3. Reschedule premium expiry tasks
     await _reschedule_premium_expiry()
 
     log.info("✅ Bot is ready and listening.")

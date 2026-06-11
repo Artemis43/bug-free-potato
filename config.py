@@ -58,4 +58,54 @@ LOG_LEVEL       = os.environ.get('LOG_LEVEL', 'INFO').upper()
 # Set to 0 to always notify (not recommended for busy bots).
 NOTIFY_COOLDOWN_HOURS = int(os.environ.get('NOTIFY_COOLDOWN_HOURS', '4'))
 
-# ── Startup validation ─────────────�
+# ── Startup validation ─────────────────────────────────────────────────────
+# Fail fast with a clear message instead of crashing later inside aiogram /
+# psycopg2 when a required variable is missing or misconfigured.
+
+_VALID_PAYMENT_MODES = ('manual', 'razorpay', 'stars')
+
+
+def _validate_config() -> None:
+    """Validate required environment variables. Raises RuntimeError on failure."""
+    errors = []
+
+    # Always-required settings
+    if not API_TOKEN:
+        errors.append("API_TOKEN is required (your Telegram bot token from @BotFather).")
+    if not ADMIN_IDS:
+        errors.append("ADMINS is required (comma-separated admin user IDs).")
+    if not POSTGRES_CONNECTION_STRING:
+        errors.append("DB_STRING is required (PostgreSQL connection string).")
+
+    # Payment mode must be one of the supported values
+    if PAYMENT_MODE not in _VALID_PAYMENT_MODES:
+        errors.append(
+            f"PAYMENT_MODE='{PAYMENT_MODE}' is invalid. "
+            f"Use one of: {', '.join(_VALID_PAYMENT_MODES)}."
+        )
+
+    # Razorpay mode needs API keys to actually create payment links
+    if PAYMENT_MODE == 'razorpay':
+        if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
+            errors.append(
+                "PAYMENT_MODE=razorpay requires RAZORPAY_KEY_ID and "
+                "RAZORPAY_KEY_SECRET to be set."
+            )
+
+    if errors:
+        bullet_list = "\n".join(f"  - {e}" for e in errors)
+        raise RuntimeError(
+            "Invalid configuration. Fix the following environment variables "
+            f"(see .env.example):\n{bullet_list}"
+        )
+
+    # Non-fatal warnings
+    if PAYMENT_MODE == 'razorpay' and not RAZORPAY_WEBHOOK_SECRET:
+        import logging
+        logging.getLogger(__name__).warning(
+            "RAZORPAY_WEBHOOK_SECRET is not set — incoming Razorpay webhooks "
+            "will be rejected. Set it to enable automatic premium activation."
+        )
+
+
+_validate_config()

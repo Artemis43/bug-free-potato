@@ -32,6 +32,7 @@ async def stop(message: types.Message):
     await message.reply("🛑 Bot is stopping…")
     logging.warning(f"Bot stopped by admin {user_id}.")
 
+    bot = get_bot()
     # Delete the webhook so Telegram doesn't try to reach us while we're down
     try:
         await bot.delete_webhook()

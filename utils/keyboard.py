@@ -23,7 +23,28 @@ Usage (replaces v2 InlineKeyboardMarkup):
 """
 from __future__ import annotations
 from typing import Optional
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton as _AiogramInlineKeyboardButton
+
+
+def IKB(text: str = None, **kwargs) -> _AiogramInlineKeyboardButton:
+    """Positional-friendly InlineKeyboardButton factory (aiogram v2 compat).
+
+    aiogram v3 makes `text` keyword-only, breaking v2-style positional calls
+    like ``InlineKeyboardButton("Label", callback_data="x")``. This wrapper
+    accepts the label positionally (or via text=) and forwards everything
+    else (callback_data, url, etc.) to the real v3 button.
+
+    Handlers alias this on import:
+        from utils.keyboard import IKB as InlineKeyboardButton
+    """
+    if text is not None:
+        kwargs.setdefault("text", text)
+    return _AiogramInlineKeyboardButton(**kwargs)
+
+
+# Backwards-compatible alias used throughout the codebase.
+InlineKeyboardButton = IKB
 
 
 def kb_button(
@@ -31,9 +52,9 @@ def kb_button(
     *,
     callback_data: Optional[str] = None,
     url: Optional[str] = None,
-) -> InlineKeyboardButton:
+) -> _AiogramInlineKeyboardButton:
     """Shorthand factory for a single inline button."""
-    return InlineKeyboardButton(
+    return _AiogramInlineKeyboardButton(
         text=text,
         callback_data=callback_data,
         url=url,

@@ -15,6 +15,7 @@ async def handle_upload(message: types.Message, file_type: str):
         return
 
     user_id = message.from_user.id
+    bot = get_bot()
 
     user = db_fetchone('SELECT status FROM users WHERE user_id = %s', (user_id,))
 

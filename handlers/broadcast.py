@@ -1,6 +1,6 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from utils.keyboard import InlineBuilder
-from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from aiogram.types import InlineKeyboardMarkup
+from utils.keyboard import InlineBuilder, IKB as InlineKeyboardButton
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest, TelegramRetryAfter
 from aiogram import Router
 from utils.bot_ref import get_bot
 import asyncio
@@ -105,6 +105,7 @@ async def execute_broadcast(callback_query: types.CallbackQuery, broadcast_id: i
     """Step 2 of 2: called from process_callback when admin taps [✅ Send Now].
     Fetches the pending broadcast from DB and sends it to all approved users.
     """
+    bot = get_bot()
     # Load from DB
     row = db_fetchone(
         'SELECT admin_id, message_text, parse_mode FROM pending_broadcasts WHERE id = %s',
@@ -161,9 +162,9 @@ async def execute_broadcast(callback_query: types.CallbackQuery, broadcast_id: i
             success += 1
         except TelegramForbiddenError:
             blocked += 1
-        except exceptions.RetryAfter as e:
-            logging.warning(f"Broadcast flood limit — waiting {e.timeout}s")
-            await asyncio.sleep(e.timeout)
+        except TelegramRetryAfter as e:
+            logging.warning(f"Broadcast flood limit — waiting {e.retry_after}s")
+            await asyncio.sleep(e.retry_after)
             try:
                 await bot.send_message(user_id, text, parse_mode=parse_mode)
                 success += 1
@@ -188,6 +189,7 @@ async def execute_broadcast(callback_query: types.CallbackQuery, broadcast_id: i
 
 async def cancel_broadcast(callback_query: types.CallbackQuery, broadcast_id: int):
     """Called from process_callback when admin taps [❌ Cancel]."""
+    bot = get_bot()
     row = db_fetchone('SELECT admin_id FROM pending_broadcasts WHERE id = %s', (broadcast_id,))
     if row and row[0] != callback_query.from_user.id:
         await bot.answer_callback_query(callback_query.id, "Not authorized.", show_alert=True)

@@ -6,7 +6,8 @@ from aiogram import Router, types
 from aiogram.enums import ChatAction, ParseMode
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.exceptions import TelegramBadRequest as MessageNotModified
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup
+from utils.keyboard import IKB as InlineKeyboardButton
 
 from config import ADMIN_CONTACT, PAYMENT_MODE, PREMIUM_INFO_URL, REQUIRED_CHANNELS
 from middlewares.authorization import (

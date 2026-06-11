@@ -1,5 +1,5 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from utils.keyboard import InlineBuilder
+from aiogram.types import InlineKeyboardMarkup
+from utils.keyboard import InlineBuilder, IKB as InlineKeyboardButton
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from aiogram import Router
 import logging
