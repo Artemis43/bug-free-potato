@@ -11,7 +11,7 @@ from utils.keyboard import IKB as InlineKeyboardButton
 from middlewares.authorization import is_private_chat, is_user_member, get_channel_title, invalidate_member_cache
 from utils.database import add_user_to_db, db_fetchone, db_execute, db_fetchall
 from utils.helpers import notify_admins, esc
-from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, PREMIUM_INFO_URL, ADMIN_CONTACT, VERIFY_URL, PAYMENT_MODE
+from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, ADMIN_CONTACT, PAYMENT_MODE
 from datetime import datetime, timedelta
 
 router = Router()

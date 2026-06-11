@@ -8,7 +8,7 @@ from aiogram import types
 from aiogram import Router
 from aiogram.enums import ParseMode
 from aiogram import Router
-from config import ADMIN_IDS, PREMIUM_INFO_URL, PAYMENT_MODE
+from config import ADMIN_IDS, ADMIN_CONTACT, PAYMENT_MODE
 from middlewares.authorization import is_private_chat
 from utils.database import db_fetchone, db_execute
 from utils.helpers import esc
@@ -136,7 +136,7 @@ async def set_premium(message: types.Message):
         await message.reply(
             f"✅ User <code>{user_id}</code> premium revoked.", parse_mode=ParseMode.HTML
         )
-        upgrade_text = 'Use /pay to upgrade again.' if PAYMENT_MODE in ('stars', 'razorpay') else f'<a href="{PREMIUM_INFO_URL}">Upgrade again →</a>'
+        upgrade_text = 'Use /pay to upgrade again.' if PAYMENT_MODE in ('stars', 'razorpay') else f'Contact {ADMIN_CONTACT} to upgrade.'
         try:
             await bot.send_message(
                 user_id,
@@ -163,7 +163,7 @@ async def remove_premium_after_expiry(user_id: int, expiration_date: datetime):
         ''',
         (user_id, datetime.now())
     )
-    renew_text = 'Use /pay to renew Premium.' if PAYMENT_MODE in ('stars', 'razorpay') else f'<a href="{PREMIUM_INFO_URL}">Renew Premium →</a>'
+    renew_text = 'Use /pay to renew Premium.' if PAYMENT_MODE in ('stars', 'razorpay') else f'Contact {ADMIN_CONTACT} to renew.'
     try:
         await bot.send_message(
             user_id,

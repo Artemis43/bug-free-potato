@@ -13,8 +13,8 @@ from middlewares.authorization import is_private_chat, is_user_member, invalidat
 from utils.database import db_fetchone
 from utils.keyboard import InlineBuilder
 from config import (
-    REQUIRED_CHANNELS, PREMIUM_INFO_URL, ADMIN_CONTACT,
-    VERIFY_URL, PAYMENT_MODE,
+    REQUIRED_CHANNELS, ADMIN_CONTACT,
+    PAYMENT_MODE,
 )
 
 router = Router()
@@ -43,33 +43,20 @@ def get_help_content() -> str:
     return (
         "🏥 <b>How to Use the Medical Content Bot</b>\n\n"
 
-        "📂 <b>Downloading Files</b>\n\n"
+        "📂 <b>Downloading Files</b>\n"
+        "📌 Tap any folder button in /start — files arrive automatically.\n"
+        "  Or type: <code>/download &lt;folder name&gt;</code>\n\n"
 
-        "📌 <b>Method 1 — Tap a folder button (easiest!)</b>\n"
-        "Send /start → tap any 📁 folder → files arrive automatically.\n\n"
-
-        "⌨️ <b>Method 2 — Type a command</b>\n"
-        "<code>/download &lt;folder name&gt;</code>  — download a specific folder.\n\n"
-
-        "━━━━━━━━━━━━━━━━━━\n\n"
-
-        "⏱️ <b>Cooldown & Speed</b>\n\n"
-        "  👤 <b>Free</b>\n"
-        "     60s between files\n"
-        "     7 min between downloads\n\n"
-        "  ⭐ <b>Premium</b>\n"
-        "     5s between files\n"
-        "     2 min between downloads\n\n"
-
-        "━━━━━━━━━━━━━━━━━━\n\n"
+        "⏱️ <b>Cooldown &amp; Speed</b>\n"
+        "  👤 Free — 60s per file · 7 min between downloads\n"
+        "  ⭐ Premium — 5s per file · 2 min between downloads\n\n"
 
         "⚠️ <b>Important</b>\n"
-        "Files are deleted from chat after a few minutes to respect copyright.\n"
-        "💾 <b>Forward them to your Saved Messages immediately!</b>\n\n"
+        "Files are removed from chat after a few minutes.\n"
+        "  💾 Forward to <b>Saved Messages</b> immediately!\n\n"
 
-        "━━━━━━━━━━━━━━━━━━\n\n"
         f"{upgrade_line}\n\n"
-        "👤 Check your account status: /status"
+        "👤 Check your account: /status"
     )
 
 
@@ -79,21 +66,25 @@ def get_about_content() -> str:
 
     return (
         "🏥 <b>Medical Content Bot</b>\n\n"
-        "Your personal study companion on Telegram — organising and delivering "
-        "medical content directly to verified students.\n\n"
-
-        "━━━━━━━━━━━━━━━━━━\n\n"
+        "Your personal study companion on Telegram — organising and "
+        "delivering medical content directly to verified students.\n\n"
 
         "🔐 <b>Why verification?</b>\n"
-        "Access is limited to verified medical students to protect content creators "
-        "and avoid copyright issues. By verifying, you help keep this resource alive "
-        "for everyone. 🙏\n\n"
+        "Access is limited to verified medical students to protect "
+        "content creators and avoid copyright issues.\n"
+        "By verifying, you help keep this resource alive for everyone. 🙏\n\n"
 
-        "━━━━━━━━━━━━━━━━━━\n\n"
+        "🎓 <b>How to get verified:</b>\n"
+        "  1️⃣ Take a photo of your student ID or enrollment letter\n"
+        f"  2️⃣ Send it to {ADMIN_CONTACT}\n"
+        "  3️⃣ Admin reviews and approves within a few hours\n\n"
+
+        "<i>Accepted: student ID card, enrollment certificate, "
+        "fee receipt with name + course.</i>\n\n"
+
         f"{upgrade_line}\n\n"
 
-        "━━━━━━━━━━━━━━━━━━\n\n"
-        "🛟 <b>Support or questions?</b>\n"
+        "🛠️ <b>Support or questions?</b>\n"
         f"Reach us at: {ADMIN_CONTACT}\n\n"
         "Good luck with your studies! 📚✨"
     )
@@ -119,8 +110,6 @@ def _about_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton("\U0001f4c2 Browse Folders",  callback_data="back_to_main"),
         InlineKeyboardButton("\u2753 How to Use",       callback_data="info_help"),
     )
-    if VERIFY_URL:
-        kb.add(InlineKeyboardButton("\u2705 Verification Info", url=VERIFY_URL))
     kb.add(InlineKeyboardButton(
         "\U0001f4ac Contact Admin",
         url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"

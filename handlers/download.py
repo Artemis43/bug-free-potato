@@ -9,7 +9,7 @@ from aiogram.exceptions import TelegramBadRequest as MessageNotModified
 from aiogram.types import InlineKeyboardMarkup
 from utils.keyboard import IKB as InlineKeyboardButton
 
-from config import ADMIN_CONTACT, PAYMENT_MODE, PREMIUM_INFO_URL, REQUIRED_CHANNELS
+from config import ADMIN_CONTACT, PAYMENT_MODE, REQUIRED_CHANNELS
 from middlewares.authorization import (
     invalidate_member_cache,
     is_private_chat,
@@ -98,7 +98,7 @@ async def _run_download(
         upsell = (
             "\n\n💳 Use /pay for 5s intervals & no cooldowns"
             if PAYMENT_MODE in ('stars', 'razorpay')
-            else f'\n\n<a href="{PREMIUM_INFO_URL}">💳 Upgrade to Premium</a> for 5s intervals'
+            else '\n\n💳 Contact ' + ADMIN_CONTACT + ' to upgrade for 5s intervals'
         )
     else:
         upsell = ""

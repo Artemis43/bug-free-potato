@@ -27,11 +27,6 @@ WEBHOOK_URL  = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 # ── Database ───────────────────────────────────────────────────────────────────
 POSTGRES_CONNECTION_STRING = os.environ.get('DB_STRING')
 
-# ── Content URLs (change via env vars without touching code) ───────────────────────
-# Verification post shown to new users on /start
-VERIFY_URL = os.environ.get('VERIFY_URL', 'https://t.me/medcontentbotinformation/4')
-# Premium upgrade info page
-PREMIUM_INFO_URL = os.environ.get('PREMIUM_INFO_URL', 'https://t.me/medcontentbotinformation/2')
 # Admin contact handle shown in rejection / support messages
 ADMIN_CONTACT = os.environ.get('ADMIN_CONTACT', '@Art3mis_adminbot')
 DEFAULT_CAPTION = os.environ.get('DEFAULT_CAPTION', '@Medical_Contentbot\nEver-growing archive of medical content')

@@ -83,7 +83,6 @@ async def stats(message: types.Message):
         # ── Compose the dashboard ─────────────────────────────────────────
         lines = [
             "📊 <b>Bot Analytics Dashboard</b>",
-            "══════════════════",
             "",
             "👥 <b>Users</b>",
             f"  Total:      <b>{total_users}</b>",
@@ -118,7 +117,6 @@ async def stats(message: types.Message):
 
         lines += [
             "",
-            "══════════════════",
             f"<i>Generated: {datetime.now().strftime('%d %b %Y at %H:%M')}</i>",
         ]
 

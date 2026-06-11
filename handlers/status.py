@@ -9,7 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from utils.keyboard import InlineBuilder
 from middlewares.authorization import is_private_chat
-from config import PREMIUM_INFO_URL, ADMIN_CONTACT, PAYMENT_MODE
+from config import ADMIN_CONTACT, PAYMENT_MODE
 from utils.database import db_fetchone
 from utils.helpers import esc
 
@@ -41,11 +41,11 @@ async def build_status_text(user_id: int, bot=None) -> Tuple[str, Optional[Inlin
 
     lines = [
         "👤 <b>Account Status</b>",
-        "──────────────────",
+        "",
         f"<b>Name:</b>     {display_name}",
         f"<b>Username:</b> {uname_str}",
         f"<b>User ID:</b>  <code>{user_id}</code>",
-        "──────────────────",
+        "",
     ]
 
     status_map = {
@@ -83,13 +83,10 @@ async def build_status_text(user_id: int, bot=None) -> Tuple[str, Optional[Inlin
         if PAYMENT_MODE in ('stars', 'razorpay'):
             premium_line = "👤 <b>Free Tier</b>  ·  use /pay to upgrade 💎"
         else:
-            premium_line = (
-                f"👤 <b>Free Tier</b>  ·  "
-                f'<a href="{PREMIUM_INFO_URL}">upgrade to Premium 💎</a>'
-            )
+            premium_line = f"👤 <b>Free Tier</b>  ·  contact {ADMIN_CONTACT} to upgrade 💎"
 
     lines.append(f"<b>Plan:</b>     {premium_line}")
-    lines.append("──────────────────")
+    lines.append("")
 
     # ── Cooldown ──────────────────────────────────────────────────────────
     cooldown_mins = 2 if is_premium else 7
@@ -114,7 +111,7 @@ async def build_status_text(user_id: int, bot=None) -> Tuple[str, Optional[Inlin
         lines.append("✅ <b>Cooldown:</b> Ready — no downloads yet!")
 
     # ── Speed summary ─────────────────────────────────────────────────────
-    lines.append("──────────────────")
+    lines.append("")
     tier = "⭐ Premium" if is_premium else "👤 Free"
     lines.append(
         f"⚡ <b>Your speed ({tier}):</b>\n"
