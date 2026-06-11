@@ -50,7 +50,8 @@ def initialize_database():
                 last_download         TIMESTAMPTZ,
                 welcome_sent          BOOLEAN     DEFAULT FALSE,
                 last_notified         TIMESTAMPTZ,
-                current_upload_folder TEXT
+                current_upload_folder TEXT,
+                created_at            TIMESTAMPTZ DEFAULT NOW()
             )
         ''')
 
@@ -206,6 +207,7 @@ def initialize_database():
         _safe_alter(cur, 'files', 'message_id',              'INTEGER')
         _safe_alter(cur, 'files', 'file_type',               "TEXT DEFAULT 'document'")
         _safe_alter(cur, 'payment_orders', 'payment_method', "TEXT DEFAULT 'razorpay'")
+        _safe_alter(cur, 'users', 'created_at',              "TIMESTAMPTZ DEFAULT NOW()")
 
         # ── Migration: replace TEXT upload-folder name with integer FK ────────
         _safe_alter(cur, 'users', 'current_upload_folder_id',
