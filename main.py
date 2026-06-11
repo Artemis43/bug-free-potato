@@ -20,7 +20,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import API_TOKEN, ADMIN_IDS, LOG_LEVEL
 from keep_alive import keep_alive
-from utils.bot_ref import set_bot
+from utils.bot_ref import set_bot, set_dispatcher
 
 # ── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -40,9 +40,11 @@ bot = Bot(
 )
 dp = Dispatcher(storage=MemoryStorage())
 
-# Register the bot instance in the central reference module so handlers can
-# call get_bot() without circular imports.
+# Register the bot & dispatcher instances in the central reference module so
+# handlers can call get_bot() / get_dispatcher() without circular imports.
+# get_dispatcher() is used by the /stop handler to stop polling gracefully.
 set_bot(bot)
+set_dispatcher(dp)
 
 # ── Middlewares ────────────────────────────────────────────────────────────
 from middlewares.rate_limit import RateLimitMiddleware, CallbackRateLimitMiddleware

@@ -1,4 +1,4 @@
-from utils.bot_ref import get_bot
+from utils.bot_ref import get_bot, get_dispatcher
 import logging
 from aiogram import types
 from aiogram import Router
@@ -39,5 +39,12 @@ async def stop(message: types.Message):
     except Exception as e:
         logging.error(f"Error deleting webhook during stop: {e}")
 
-    import sys
-    sys.exit(0)
+    # Gracefully stop long-polling. This unwinds main()'s start_polling() loop,
+    # which then runs on_shutdown and lets the process exit cleanly (the
+    # keep-alive Flask server runs in a daemon thread, so it doesn't block exit).
+    #
+    # Do NOT use sys.exit() here: raising SystemExit inside an aiogram update
+    # task only terminates that one task and logs "Task exception was never
+    # retrieved" — it does not actually stop polling.
+    dp = get_dispatcher()
+    await dp.stop_polling()
