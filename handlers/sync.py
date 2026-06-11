@@ -1,8 +1,11 @@
 import logging
 from aiogram import types
+from aiogram import Router
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS
 from utils.database import db_execute
+
+router = Router()
 
 
 async def sync_database_command(message: types.Message):

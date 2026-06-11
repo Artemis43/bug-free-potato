@@ -1,14 +1,18 @@
+from utils.bot_ref import get_bot
 import logging
 from aiogram import types
-from aiogram.types import ParseMode
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram import Router
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS
 from utils.database import db_fetchone
 
+router = Router()
+
 
 async def stop(message: types.Message):
     """Admin-only command: /stop — gracefully shut down the bot process."""
-    from main import bot
     if not is_private_chat(message):
         return
 

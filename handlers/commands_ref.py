@@ -1,7 +1,11 @@
 from aiogram import types
-from aiogram.types import ParseMode
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram import Router
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS
+
+router = Router()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

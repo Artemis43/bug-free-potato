@@ -1,3 +1,8 @@
+from utils.keyboard import InlineBuilder
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from aiogram import Router
+from aiogram.enums import ParseMode
+from utils.bot_ref import get_bot
 """
 handlers/payment_stars.py
 ─────────────────────────────────────────────────────────────────────────────
@@ -29,12 +34,18 @@ Stars notes
 import logging
 from datetime import datetime, timedelta
 
-from aiogram import exceptions, types
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, ParseMode
+from aiogram import types
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
+from aiogram import Router
+from aiogram.enums import ParseMode
 
 from config import ADMIN_CONTACT, ADMIN_GROUP_ID, ADMIN_IDS
 from utils.database import db_execute, db_fetchall, db_fetchone
 from utils.helpers import esc
+
+router = Router()
 
 log = logging.getLogger(__name__)
 
@@ -165,8 +176,6 @@ async def create_folder_invoice_link(bot, folder_id: int) -> str | None:
 async def cmd_pay_stars(message: types.Message) -> None:
     """/pay in Stars mode — show plan picker or go straight to invoice."""
     from middlewares.authorization import is_private_chat
-    from main import bot
-
     if not is_private_chat(message):
         return
 
@@ -180,7 +189,7 @@ async def cmd_pay_stars(message: types.Message) -> None:
         )
         return
 
-    arg = message.get_args().strip().lower()
+    arg = (message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else '').lower()
 
     # Direct plan by name
     if arg:
@@ -200,7 +209,7 @@ async def cmd_pay_stars(message: types.Message) -> None:
         return
 
     # Multiple plans → show inline picker
-    kb = InlineKeyboardMarkup(row_width=1)
+    kb = InlineBuilder()
     for plan_id, name, amount_stars, days in plans:
         kb.add(InlineKeyboardButton(
             f"⭐ {name} — {amount_stars} Stars ({days} days)",
@@ -210,19 +219,17 @@ async def cmd_pay_stars(message: types.Message) -> None:
     await message.reply(
         "⭐ <b>Choose a Premium Plan</b>\n\nSelect the plan you want to purchase:",
         parse_mode=ParseMode.HTML,
-        reply_markup=kb,
+        reply_markup=kb.build(),
     )
 
 
 async def cmd_payfolder_stars(message: types.Message) -> None:
     """/payfolder in Stars mode."""
     from middlewares.authorization import is_private_chat
-    from main import bot
-
     if not is_private_chat(message):
         return
 
-    args = message.get_args().strip()
+    args = (message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else '')
     if not args:
         await message.reply(
             "Usage: <code>/payfolder &lt;folder_id&gt;</code>\n\nUse /start to see folder IDs.",
@@ -244,7 +251,6 @@ async def cmd_payfolder_stars(message: types.Message) -> None:
 
 async def handle_stars_plan_callback(callback_query: types.CallbackQuery) -> None:
     """Dispatched from start._CB_HANDLERS for stars_plan: and stars_cancel."""
-    from main import bot
     data = callback_query.data or ""
     user_id = callback_query.from_user.id
 
@@ -291,7 +297,6 @@ async def handle_stars_plan_callback(callback_query: types.CallbackQuery) -> Non
 
 async def pre_checkout_handler(pre_checkout_query: types.PreCheckoutQuery) -> None:
     """Validate the Stars payment before Telegram confirms it."""
-    from main import bot
     payload = pre_checkout_query.invoice_payload or ""
     ok, error_msg = False, "Invalid payment."
 
@@ -328,7 +333,6 @@ async def pre_checkout_handler(pre_checkout_query: types.PreCheckoutQuery) -> No
 
 async def successful_payment_handler(message: types.Message) -> None:
     """Process a confirmed Telegram Stars payment."""
-    from main import bot
     from handlers.setpremium import remove_premium_after_expiry
     import asyncio
 
@@ -404,7 +408,7 @@ async def successful_payment_handler(message: types.Message) -> None:
                 f"Use /start to explore!",
                 parse_mode=ParseMode.HTML,
             )
-        except exceptions.BotBlocked:
+        except TelegramForbiddenError:
             pass
 
         # Notify admin
@@ -449,7 +453,7 @@ async def successful_payment_handler(message: types.Message) -> None:
                 f"Use /start and tap the folder to begin your download.",
                 parse_mode=ParseMode.HTML,
             )
-        except exceptions.BotBlocked:
+        except TelegramForbiddenError:
             pass
 
     else:

@@ -1,12 +1,19 @@
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from aiogram import Router
+from utils.bot_ref import get_bot
 import logging
 import asyncio
 from datetime import datetime, timedelta
-from aiogram import types, exceptions
-from aiogram.types import ParseMode
+from aiogram import types
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram import Router
 from config import ADMIN_IDS, PREMIUM_INFO_URL, PAYMENT_MODE
 from middlewares.authorization import is_private_chat
 from utils.database import db_fetchone, db_execute
 from utils.helpers import esc
+
+router = Router()
 
 
 async def set_premium_status(message: types.Message):
@@ -43,14 +50,13 @@ async def set_premium_status(message: types.Message):
 
 async def set_premium(message: types.Message):
     """Admin: /setuser <user_id> <on|off|days:N> — manage user premium."""
-    from main import bot
     if not is_private_chat(message):
         return
     if str(message.from_user.id) not in ADMIN_IDS:
         await message.reply("You are not authorized.")
         return
 
-    args = message.get_args().split()
+    args = (message.text.split(None, 1)[1].split() if message.text and len(message.text.split(None, 1)) > 1 else [])
     if len(args) < 2:
         await message.reply(
             "Usage: <code>/setuser &lt;user_id&gt; &lt;on|off|days:N&gt;</code>\n\n"
@@ -116,7 +122,7 @@ async def set_premium(message: types.Message):
                 f"Use /start to explore!",
                 parse_mode=ParseMode.HTML
             )
-        except exceptions.BotBlocked:
+        except TelegramForbiddenError:
             await message.reply(f"Could not notify user {user_id} — they've blocked the bot.")
 
         asyncio.create_task(remove_premium_after_expiry(user_id, expiration_date))
@@ -138,13 +144,12 @@ async def set_premium(message: types.Message):
                 f"{upgrade_text}",
                 parse_mode=ParseMode.HTML
             )
-        except exceptions.BotBlocked:
+        except TelegramForbiddenError:
             pass
 
 
 async def remove_premium_after_expiry(user_id: int, expiration_date: datetime):
     """Background task: auto-expire premium at the scheduled time."""
-    from main import bot
     sleep_time = max((expiration_date - datetime.now()).total_seconds(), 0)
     await asyncio.sleep(sleep_time)
 
@@ -165,7 +170,7 @@ async def remove_premium_after_expiry(user_id: int, expiration_date: datetime):
             f"{renew_text}",
             parse_mode=ParseMode.HTML
         )
-    except exceptions.BotBlocked:
+    except TelegramForbiddenError:
         logging.warning(f"Could not notify user {user_id} about premium expiry — bot blocked.")
     except Exception as e:
         logging.error(f"Error notifying user {user_id} of premium expiry: {e}")

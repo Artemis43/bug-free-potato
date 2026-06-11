@@ -1,3 +1,7 @@
+from utils.keyboard import InlineBuilder
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from aiogram import Router
+from utils.bot_ref import get_bot
 """
 handlers/payment.py
 ────────────────────────────────────────────────────────────────────────────
@@ -19,17 +23,16 @@ import logging
 from datetime import datetime, timedelta
 
 import razorpay
-from aiogram import exceptions, types
-from aiogram.types import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    ParseMode,
-)
+from aiogram import types
+from aiogram.enums import ParseMode
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import ADMIN_IDS, ADMIN_CONTACT, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, ADMIN_GROUP_ID, PAYMENT_MODE
 from middlewares.authorization import is_private_chat
 from utils.database import db_execute, db_fetchall, db_fetchone
 from utils.helpers import esc
+
+router = Router()
 
 log = logging.getLogger(__name__)
 
@@ -144,7 +147,7 @@ async def cmd_pay(message: types.Message):
         )
         return
 
-    arg = message.get_args().strip().lower()
+    arg = (message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else '').lower()
 
     # If a specific plan is requested by name
     matched = None
@@ -163,7 +166,7 @@ async def cmd_pay(message: types.Message):
 
     # Show plan picker if no plan specified
     if not matched:
-        kb = InlineKeyboardMarkup(row_width=1)
+        kb = InlineBuilder()
         for plan_id, name, amount_paise, days in plans:
             kb.add(InlineKeyboardButton(
                 f"💳 {name} — {_fmt_inr(amount_paise)} ({days} days)",
@@ -174,7 +177,7 @@ async def cmd_pay(message: types.Message):
             "⭐ <b>Choose a Premium Plan</b>\n\n"
             "Select the plan you want to purchase:",
             parse_mode=ParseMode.HTML,
-            reply_markup=kb
+            reply_markup=kb.build()
         )
         return
 
@@ -214,7 +217,7 @@ async def _create_premium_link(reply_fn, user_id: int, plan: tuple):
         (payment_link_id, user_id, plan_id, amount_paise)
     )
 
-    kb = InlineKeyboardMarkup()
+    kb = InlineBuilder()
     kb.add(InlineKeyboardButton("💳 Pay Now", url=payment_url))
 
     await reply_fn(
@@ -225,7 +228,7 @@ async def _create_premium_link(reply_fn, user_id: int, plan: tuple):
         "✅ Your premium will be <b>activated automatically</b> after payment.\n"
         "<i>Link expires in 15 minutes.</i>",
         parse_mode=ParseMode.HTML,
-        reply_markup=kb,
+        reply_markup=kb.build(),
     )
 
 
@@ -259,7 +262,7 @@ async def cmd_payfolder(message: types.Message):
         )
         return
 
-    args = message.get_args().strip()
+    args = (message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else '')
     if not args:
         await message.reply(
             "Usage: <code>/payfolder &lt;folder_id&gt;</code>\n\n"
@@ -323,7 +326,7 @@ async def _create_folder_link(reply_fn, user_id: int, folder_id: int):
         (payment_link_id, user_id, folder_id, price)
     )
 
-    kb = InlineKeyboardMarkup()
+    kb = InlineBuilder()
     kb.add(InlineKeyboardButton("💳 Pay Now", url=payment_url))
 
     await reply_fn(
@@ -334,7 +337,7 @@ async def _create_folder_link(reply_fn, user_id: int, folder_id: int):
         "Tap <b>Pay Now</b> to complete via UPI / Card / Net Banking.\n"
         "<i>Link expires in 15 minutes.</i>",
         parse_mode=ParseMode.HTML,
-        reply_markup=kb,
+        reply_markup=kb.build(),
     )
 
 
@@ -344,7 +347,6 @@ async def _create_folder_link(reply_fn, user_id: int, folder_id: int):
 
 async def handle_pay_callback(callback_query: types.CallbackQuery):
     """Dispatched from start.process_callback for pay_plan: and pay_cancel data."""
-    from main import bot
     data = callback_query.data or ""
     user_id = callback_query.from_user.id
 
@@ -415,7 +417,6 @@ def verify_razorpay_signature(payload_bytes: bytes, signature: str, secret: str)
 
 async def _activate_premium(user_id: int, plan_id: int, razorpay_payment_id: str):
     """Grant premium to user based on plan. Called after verified payment."""
-    from main import bot
     from handlers.setpremium import remove_premium_after_expiry
 
     plan = db_fetchone(
@@ -466,7 +467,7 @@ async def _activate_premium(user_id: int, plan_id: int, razorpay_payment_id: str
             f"Use /start to explore!",
             parse_mode=ParseMode.HTML
         )
-    except exceptions.BotBlocked:
+    except TelegramForbiddenError:
         log.warning(f"[Payment] Could not notify user {user_id} — bot blocked.")
     except Exception as e:
         log.error(f"[Payment] Error notifying user {user_id}: {e}")
@@ -496,8 +497,6 @@ async def _activate_premium(user_id: int, plan_id: int, razorpay_payment_id: str
 
 async def _handle_folder_payment(user_id: int, folder_id: int, razorpay_payment_id: str):
     """After payment for a paid folder: auto-approve access and notify user."""
-    from main import bot
-
     db_execute(
         "UPDATE payment_orders SET status = 'paid', paid_at = NOW(), razorpay_payment_id = %s "
         "WHERE razorpay_payment_id = %s OR (user_id = %s AND order_type = 'folder' AND ref_id = %s AND status = 'created')",
@@ -526,7 +525,7 @@ async def _handle_folder_payment(user_id: int, folder_id: int, razorpay_payment_
             f"Use /start and tap the folder to begin your download.",
             parse_mode=ParseMode.HTML
         )
-    except exceptions.BotBlocked:
+    except TelegramForbiddenError:
         log.warning(f"[Payment] Could not notify user {user_id} — bot blocked.")
     except Exception as e:
         log.error(f"[Payment] Error notifying user {user_id}: {e}")
@@ -588,7 +587,7 @@ async def cmd_payconfig(message: types.Message):
         await message.reply("Not authorized.")
         return
 
-    args = message.get_args().split()
+    args = (message.text.split(None, 1)[1].split() if message.text and len(message.text.split(None, 1)) > 1 else [])
     sub = args[0].lower() if args else "list"
 
     # ── Stars mode: delegate to payment_stars ────────────────────────────────

@@ -1,9 +1,13 @@
 from aiogram import types
-from aiogram.types import ParseMode
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram import Router
 from config import ADMIN_IDS
 from middlewares.authorization import is_private_chat
 from utils.database import db_execute
 from utils.helpers import esc
+
+router = Router()
 
 
 async def set_caption(message: types.Message):
@@ -15,7 +19,7 @@ async def set_caption(message: types.Message):
         await message.reply("You are not authorized to set captions.")
         return
 
-    args = message.get_args()
+    args = (message.text.split(None, 1)[1] if message.text and len(message.text.split(None, 1)) > 1 else '')
     if not args:
         await message.reply(
             "Usage: <code>/caption &lt;custom|append&gt; &lt;your text&gt;</code>\n\n"

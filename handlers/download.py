@@ -1,44 +1,85 @@
+from utils.keyboard import InlineBuilder
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from aiogram import Router
+from aiogram.enums import ParseMode
+from utils.bot_ref import get_bot
 from datetime import datetime, timedelta
 import asyncio
 import logging
-from aiogram import types, exceptions
-from aiogram.types import ParseMode
-from aiogram.utils.exceptions import MessageNotModified
+from aiogram import types
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram.enums import ChatAction
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest as MessageNotModified
+from aiogram import Router
+from aiogram.enums import ParseMode
 from config import REQUIRED_CHANNELS, PREMIUM_INFO_URL, ADMIN_CONTACT, PAYMENT_MODE
 from utils.helpers import notify_admin_for_approval, notify_admin_for_approval_again, esc
 from middlewares.authorization import is_private_chat, is_user_member, invalidate_member_cache
 from utils.database import db_fetchone, db_fetchall, db_execute
+import utils.progress as progress
 
+log = logging.getLogger(__name__)
+async def _run_download(
+    bot, chat_id: int, user_id: int,
+    folder_id: int, folder_name: str,
+    is_premium: bool, is_premium_folder: bool,
+    requires_admin_approval: bool,
+):
+    """
+    Background coroutine: send all files in a folder, showing live per-file
+    progress with a cancel button, then schedule deletion.
+    """
 
-async def _run_download(bot, chat_id: int, user_id: int,
-                        folder_id: int, folder_name: str,
-                        is_premium: bool, is_premium_folder: bool,
-                        requires_admin_approval: bool):
-    """Background coroutine: send all files in a folder then schedule deletion."""
-
-    # ── Progress bar ──────────────────────────────────────────────────────────
-    try:
-        progress_message = await bot.send_message(
-            chat_id, "⚡ Connecting to servers…\n[░░░░░░░░░░░░░░░░░░░░░]"
-        )
-    except Exception as e:
-        logging.error(f"Could not send progress message to {chat_id}: {e}")
-        return
-
-    BAR_LENGTH = 21
-    for i in range(1, BAR_LENGTH + 1):
-        bar = "█" * i + "░" * (BAR_LENGTH - i)
+    # ── Guard: prevent duplicate downloads ────────────────────────────────
+    if progress.is_downloading(chat_id):
         try:
-            await progress_message.edit_text(f"⚡ Connecting to servers…\n[{bar}]")
+            await bot.send_message(
+                chat_id,
+                "⚠️ <b>Download already in progress!</b>\n"
+                "Please wait for the current download to finish, "
+                "or tap Cancel on the progress message.",
+                parse_mode=ParseMode.HTML,
+            )
         except Exception:
             pass
-        await asyncio.sleep(7 / BAR_LENGTH)
+        return
 
-    await progress_message.edit_text("🚀 Download starting…")
-    await asyncio.sleep(2)
+    # Show upload indicator while preparing
+    try:
+        await bot.send_chat_action(chat_id, ChatAction.UPLOAD_DOCUMENT)
+    except Exception:
+        pass
 
-    # ── Info card ─────────────────────────────────────────────────────────────
-    file_interval   = 5  if is_premium else 60
+    # ── Fetch files first so we know the total ────────────────────────────
+    files = db_fetchall(
+        'SELECT file_id, file_name, caption, file_type FROM files WHERE folder_id = %s',
+        (folder_id,)
+    )
+    if not files:
+        await bot.send_message(
+            chat_id,
+            "⚠️ <b>No files found</b> in this folder yet.\n"
+            "Check back soon — content is being added!\n"
+            "Use /start to return to the menu.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    n             = len(files)
+    file_interval = 5 if is_premium else 60
+
+    if   n <= 25: delete_time = 120
+    elif n <= 50: delete_time = 180
+    elif n <= 75: delete_time = 240
+    else:         delete_time = 300
+
+    # ── Register download session ─────────────────────────────────────────
+    progress.start_download(chat_id, folder_name, n)
+
+    # ── Info card + Cancel button ─────────────────────────────────────────
     time_interval   = timedelta(minutes=2) if is_premium else timedelta(minutes=7)
     next_dl_minutes = int(time_interval.total_seconds() / 60)
 
@@ -50,51 +91,61 @@ async def _run_download(bot, chat_id: int, user_id: int,
     display_name = esc(name_row[0] if name_row and name_row[0] else f"User {user_id}")
 
     tier     = "Premium" if is_premium else "Free"
-    tier_ico = "🎉" if is_premium else "🔓"
+    tier_ico = "⭐" if is_premium else "👤"
+
     if not is_premium:
-        if PAYMENT_MODE in ('stars', 'razorpay'):
-            upsell = '\n\n💡 Use /pay to upgrade to Premium for 5s intervals'
-        else:
-            upsell = f'\n\n💡 <a href="{PREMIUM_INFO_URL}">Upgrade to Premium</a> for 5s intervals'
+        upsell = (
+            "\n\n💳 Use /pay for 5s intervals & no cooldowns"
+            if PAYMENT_MODE in ('stars', 'razorpay')
+            else f'\n\n<a href="{PREMIUM_INFO_URL}">💳 Upgrade to Premium</a> for 5s intervals'
+        )
     else:
         upsell = ""
 
+    cancel_kb = InlineBuilder()
+    cancel_kb.add(InlineKeyboardButton("❌ Cancel Download", callback_data=f"cancel_dl:{chat_id}"))
+
+    progress_text = progress.build_progress_text(chat_id, file_interval)
     info_text = (
         f"{tier_ico} <b>{tier} Download</b>\n\n"
         f"👤 {display_name}\n"
-        f"📁 Folder: <code>{esc(folder_name)}</code> ({folder_type})\n"
+        f"📂 Folder: <code>{esc(folder_name)}</code> ({folder_type})\n"
         f"⏱ Interval: <code>{file_interval}s</code> between files\n"
-        f"⏳ Next download available in: <code>{next_dl_minutes} min(s)</code>"
-        f"{upsell}"
+        f"⏳ Next download in: <code>{next_dl_minutes} min</code>"
+        f"{upsell}\n\n"
+        f"{progress_text}"
     )
-    await progress_message.edit_text(info_text, parse_mode=ParseMode.HTML)
 
-    # ── Update download counter ───────────────────────────────────────────────
+    try:
+        prog_msg = await bot.send_message(
+            chat_id, info_text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=cancel_kb.build(),
+        )
+        progress.set_progress_msg_id(chat_id, prog_msg.message_id)
+    except Exception as e:
+        log.error(f"Could not send progress message to {chat_id}: {e}")
+        progress.finish_download(chat_id)
+        return
+
+    # ── Update download counter ───────────────────────────────────────────
     db_execute(
         'UPDATE folders SET download_count = download_count + 1 WHERE id = %s',
         (folder_id,)
     )
 
-    # ── Fetch files ───────────────────────────────────────────────────────────
-    files = db_fetchall(
-        'SELECT file_id, file_name, caption, file_type FROM files WHERE folder_id = %s',
-        (folder_id,)
-    )
-    if not files:
-        await bot.send_message(chat_id, "⚠️ No files found in this folder yet.")
-        return
-
-    n = len(files)
-    if   n <= 25:  delete_time = 120
-    elif n <= 50:  delete_time = 180
-    elif n <= 75:  delete_time = 240
-    else:          delete_time = 300
-
     # Record cooldown before sending (prevents re-download on crash)
     db_execute('UPDATE users SET last_download = %s WHERE user_id = %s', (datetime.now(), user_id))
 
-    messages_to_delete = []
+    # ── Send files with live progress ─────────────────────────────────────
+    messages_to_delete: list[int] = []
+
     for index, (file_id, file_name, caption, file_type) in enumerate(files):
+        # Check for cancel signal
+        if progress.is_cancelled(chat_id):
+            log.info(f"Download cancelled by user {user_id} at file {index + 1}/{n}")
+            break
+
         try:
             if file_type == 'document':
                 sent = await bot.send_document(chat_id, file_id, caption=caption)
@@ -103,48 +154,101 @@ async def _run_download(bot, chat_id: int, user_id: int,
             elif file_type == 'photo':
                 sent = await bot.send_photo(chat_id, file_id, caption=caption)
             else:
-                logging.warning(f"Unknown file_type '{file_type}' for file_id {file_id}, skipping.")
+                log.warning(f"Unknown file_type '{file_type}' for file_id {file_id} — skipping.")
                 continue
             messages_to_delete.append(sent.message_id)
+        except TelegramForbiddenError:
+            log.warning(f"User {user_id} blocked bot mid-download.")
+            break
         except Exception as e:
-            logging.error(f"Error sending file {file_id}: {e}")
+            log.error(f"Error sending file {file_id}: {e}")
             continue
 
-        if file_interval > 0 and index < len(files) - 1:
+        progress.increment_sent(chat_id)
+
+        # Update progress message every file (throttle to avoid flood)
+        if prog_msg and index % 1 == 0:
+            try:
+                new_text = (
+                    f"{tier_ico} <b>{tier} Download</b>\n\n"
+                    f"👤 {display_name}\n"
+                    f"📂 Folder: <code>{esc(folder_name)}</code> ({folder_type})\n"
+                    f"⏱ Interval: <code>{file_interval}s</code>\n"
+                    f"⏳ Next download in: <code>{next_dl_minutes} min</code>"
+                    f"{upsell}\n\n"
+                    f"{progress.build_progress_text(chat_id, file_interval)}"
+                )
+                await bot.edit_message_text(
+                    new_text,
+                    chat_id=chat_id,
+                    message_id=prog_msg.message_id,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=cancel_kb.build(),
+                )
+            except (MessageNotModified, Exception):
+                pass
+
+        if file_interval > 0 and index < n - 1:
             await asyncio.sleep(file_interval)
 
-    if requires_admin_approval:
+    # ── Completion / cancellation ─────────────────────────────────────────
+    sent_count  = progress.get_state(chat_id)["sent"] if progress.get_state(chat_id) else 0
+    was_cancelled = progress.is_cancelled(chat_id)
+    progress.finish_download(chat_id)
+
+    if requires_admin_approval and not was_cancelled:
         db_execute(
-            'UPDATE user_folder_approval SET download_completed = TRUE WHERE user_id = %s AND folder_id = %s',
+            'UPDATE user_folder_approval SET download_completed = TRUE '
+            'WHERE user_id = %s AND folder_id = %s',
             (user_id, folder_id)
         )
 
-    # ── Warning with relative deletion time (timezone-independent) ───────────
-    sent_count   = len(messages_to_delete)
+    # Remove cancel button from progress message
+    try:
+        status_prefix = "\u274c Cancelled" if was_cancelled else "\u2705 Complete"
+        if not was_cancelled and messages_to_delete:
+            body = (
+                f"\u23f3 Files will be <b>auto-deleted in {delete_time // 60} min</b>.\n"
+                f"\U0001f4be Forward them to <b>Saved Messages</b> now!"
+            )
+        else:
+            body = "\u26a0\ufe0f Download was cancelled. No further files will be sent."
 
-    warning_message = await bot.send_message(
-        chat_id,
-        f"✅ <b>{sent_count}/{n} files sent!</b>\n\n"
-        f"⚠️ Files will be <b>auto-deleted in {delete_time // 60} minutes</b>.\n"
-        f"📌 Forward them to <b>Saved Messages</b> now!",
-        parse_mode=ParseMode.HTML
-    )
+        final_progress_text = (
+            f"{status_prefix}: "
+            f"<b>{sent_count}/{n} files</b> from <code>{esc(folder_name)}</code>\n\n"
+            + body
+        )
+        await bot.edit_message_text(
+            final_progress_text,
+            chat_id=chat_id,
+            message_id=prog_msg.message_id,
+            parse_mode=ParseMode.HTML,
+            reply_markup=None,   # removes cancel button
+        )
+    except Exception:
+        pass
 
+    if was_cancelled or not messages_to_delete:
+        return
+
+    # ── Schedule deletion ─────────────────────────────────────────────────
     await asyncio.sleep(delete_time)
 
     for msg_id in messages_to_delete:
         try:
             await bot.delete_message(chat_id, msg_id)
-        except exceptions.MessageToDeleteNotFound:
+        except TelegramBadRequest:
             continue
         except Exception as e:
             logging.error(f"Error deleting message {msg_id}: {e}")
 
     try:
         await bot.edit_message_text(
-            "🗑 Downloaded files have been deleted.\nAll the Best! 🙌",
+            "\U0001f5d1 Downloaded files have been deleted.\n"
+            "\U0001f4da All the best with your studies! \U0001f31f",
             chat_id=chat_id,
-            message_id=warning_message.message_id
+            message_id=prog_msg.message_id,
         )
     except Exception:
         pass
@@ -161,12 +265,12 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
     (editing the main message) rather than new messages, so the user never leaves
     their current context.  The callback toast is only fired on success.
     """
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ParseMode as PM
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton as PM
 
     async def overlay(text: str, *, parse_mode=None, extra_buttons=None):
         """Show gate message: overlay on the UI message, or fall back to reply_fn."""
         if ui_message_id:
-            kb = InlineKeyboardMarkup()
+            kb = InlineBuilder()
             if extra_buttons:
                 for btn in extra_buttons:
                     kb.row(btn)
@@ -177,7 +281,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                     message_id=ui_message_id,
                     text=text,
                     parse_mode=parse_mode,
-                    reply_markup=kb,
+                    reply_markup=kb.build(),
                 )
                 if callback_query_id:
                     await bot.answer_callback_query(callback_query_id)
@@ -185,10 +289,10 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                 await reply_fn(text, parse_mode=parse_mode)
         else:
             if extra_buttons:
-                kb = InlineKeyboardMarkup()
+                kb = InlineBuilder()
                 for btn in extra_buttons:
                     kb.row(btn)
-                await reply_fn(text, parse_mode=parse_mode, reply_markup=kb)
+                await reply_fn(text, parse_mode=parse_mode, reply_markup=kb.build())
             else:
                 await reply_fn(text, parse_mode=parse_mode)
 
@@ -293,12 +397,11 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
                 from handlers.payment_stars import (
                     get_stars_folder_price, default_stars_folder_price, create_folder_invoice_link
                 )
-                from main import bot as _bot
                 price = get_stars_folder_price(folder_id)
                 if price is None:
                     price = default_stars_folder_price()
                 
-                invoice_url = await create_folder_invoice_link(_bot, folder_id)
+                invoice_url = await create_folder_invoice_link(bot, folder_id)
                 if invoice_url:
                     await overlay(
                         f"💰 <b>Paid Folder: {esc(folder_name)}</b>\n\n"
@@ -418,12 +521,11 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
 
 async def get_all_files(message: types.Message):
     """/download <folder_name> command handler."""
-    from main import bot
     if not is_private_chat(message):
         return
 
     user_id     = message.from_user.id
-    folder_name = message.get_args().strip()
+    folder_name = (message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else '')
 
     if not folder_name:
         await message.reply(
@@ -445,6 +547,8 @@ async def get_all_files(message: types.Message):
 
     folder_id = row[0]
 
+    bot = get_bot()
+
     async def reply_fn(text, **kwargs):
         await message.reply(text, **kwargs)
 
@@ -459,7 +563,7 @@ async def trigger_folder_download(user_id: int, folder_id: int, chat_id: int,
     callback_query_id and ui_message_id are passed when triggered from the
     inline keyboard so gate messages can be shown as in-place overlays.
     """
-    from main import bot
+    bot = get_bot()
 
     async def reply_fn(text, **kwargs):
         await bot.send_message(chat_id, text, **kwargs)
@@ -472,7 +576,6 @@ async def trigger_folder_download(user_id: int, folder_id: int, chat_id: int,
 
 
 async def handle_approval(message: types.Message):
-    from main import bot
     try:
         parts = message.text.split()
         if len(parts) != 3:
@@ -495,22 +598,21 @@ async def handle_approval(message: types.Message):
             ''',
             (user_id, folder_id)
         )
-        await bot.send_message(
+        await get_bot().send_message(
             user_id,
-            "✅ <b>Download Approved!</b>\n\n"
+            "\u2705 <b>Download Approved!</b>\n\n"
             "Your request for the paid folder has been approved.\n"
             "You get <b>1 download</b> at Premium speed.\n\n"
             "Use /start to see the folder list and tap the folder to download.",
             parse_mode=ParseMode.HTML
         )
-        await message.reply("✅ User approved for download.")
+        await message.reply("\u2705 User approved for download.")
     except Exception as e:
         logging.error(f"Error in handle_approval: {e}")
         await message.reply("Failed to approve the user.")
 
 
 async def handle_rejection(message: types.Message):
-    from main import bot
     try:
         parts = message.text.split()
         if len(parts) != 3:
@@ -529,12 +631,12 @@ async def handle_rejection(message: types.Message):
             'DELETE FROM user_folder_approval WHERE user_id = %s AND folder_id = %s',
             (user_id, folder_id)
         )
-        await bot.send_message(
+        await get_bot().send_message(
             user_id,
-            f"❌ Your download request was not approved.\n\n"
+            f"\u274c Your download request was not approved.\n\n"
             f"Contact us if you think this is a mistake: {ADMIN_CONTACT}"
         )
-        await message.reply("❌ User's request rejected.")
+        await message.reply("\u274c User's request rejected.")
     except Exception as e:
         logging.error(f"Error in handle_rejection: {e}")
         await message.reply("Failed to reject the user.")

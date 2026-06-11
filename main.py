@@ -1,99 +1,167 @@
+"""
+main.py — bot entry point (aiogram v3).
+
+Key v3 changes vs v2:
+  - Dispatcher() no longer takes a Bot instance
+  - Handlers are registered via Router decorators (see each handler module)
+  - executor.start_polling() → asyncio.run(dp.start_polling(bot))
+  - Middlewares use BaseMiddleware.__call__ signature
+  - Errors are handled via router.errors() decorator
+"""
+import asyncio
 import logging
-from aiogram import types, Bot, Dispatcher
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
+import traceback
+
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
+from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import API_TOKEN, ADMIN_IDS, LOG_LEVEL
 from keep_alive import keep_alive
-
-# ── Keep-alive web server ──────────────────────────────────────────────────
-keep_alive()
+from utils.bot_ref import set_bot
 
 # ── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+log = logging.getLogger(__name__)
 
-# ── Bot & dispatcher ───────────────────────────────────────────────────────
-bot = Bot(token=API_TOKEN)
-dp  = Dispatcher(bot)
-dp.middleware.setup(LoggingMiddleware())
+# ── Keep-alive web server ──────────────────────────────────────────────────
+keep_alive()
 
+# ── Bot & Dispatcher ───────────────────────────────────────────────────────
+bot = Bot(
+    token=API_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+)
+dp = Dispatcher(storage=MemoryStorage())
 
-# ── Import handlers AFTER bot/dp are created ──────────────────────────────
+# Register the bot instance in the central reference module so handlers can
+# call get_bot() without circular imports.
+set_bot(bot)
+
+# ── Middlewares ────────────────────────────────────────────────────────────
+from middlewares.rate_limit import RateLimitMiddleware, CallbackRateLimitMiddleware
+from utils.monitoring import record_update, record_handler_error
+
+class _UpdateTrackingMiddleware(BaseMiddleware):
+    """Thin middleware that marks each processed update in monitoring."""
+    async def __call__(self, handler, event, data):
+        record_update()
+        return await handler(event, data)
+
+dp.message.middleware(RateLimitMiddleware())
+dp.callback_query.middleware(CallbackRateLimitMiddleware())
+dp.message.middleware(_UpdateTrackingMiddleware())
+dp.callback_query.middleware(_UpdateTrackingMiddleware())
+
+# ── Routers ───────────────────────────────────────────────────────────────
+# Each handler module exposes a `router` object.
+# We import and include them here so dp knows about every handler.
 from handlers import (
     start, broadcast, caption, document,
     getlist, folder, download, setpremium,
     stop, about_help, sync, status, admin_tools, commands_ref, payment,
-    payment_stars,
+    payment_stars, stats,
 )
 
-# ── Command handlers ───────────────────────────────────────────────────────
-dp.register_message_handler(start.handle_start,                 commands=['start'])
-dp.register_message_handler(about_help.about,                   commands=['about'])
-dp.register_message_handler(about_help.help,                    commands=['help'])
-dp.register_message_handler(status.status,                      commands=['status'])
-dp.register_message_handler(commands_ref.commands_reference,    commands=['commands'])
-dp.register_message_handler(broadcast.broadcast_message,        commands=['broadcast'])
-dp.register_message_handler(caption.set_caption,                commands=['caption'])
-dp.register_message_handler(getlist.list_all,                   commands=['list'])
-dp.register_message_handler(admin_tools.pending_users,          commands=['pending'])
-dp.register_message_handler(admin_tools.user_info,              commands=['userinfo'])
-dp.register_message_handler(admin_tools.reset_cooldown,         commands=['resetcooldown'])
-dp.register_message_handler(admin_tools.set_upload_folder,      commands=['setuploadfolder'])
-dp.register_message_handler(folder.rename_folder,               commands=['renamefolder'])
-dp.register_message_handler(folder.create_folder,               commands=['newfolder'])
-dp.register_message_handler(folder.delete_folder,               commands=['deletefolder'])
-dp.register_message_handler(download.get_all_files,             commands=['download'])
-dp.register_message_handler(setpremium.set_premium_status,      commands=['setfolder'])
-dp.register_message_handler(setpremium.set_premium,             commands=['setuser'])
-dp.register_message_handler(download.handle_approval,           commands=['approve'])
-dp.register_message_handler(download.handle_rejection,          commands=['reject'])
-dp.register_message_handler(payment.cmd_pay,                    commands=['pay'])
-dp.register_message_handler(payment.cmd_payfolder,              commands=['payfolder'])
-dp.register_message_handler(payment.cmd_payconfig,              commands=['payconfig'])
-dp.register_message_handler(stop.stop,                          commands=['stop'])
-dp.register_message_handler(sync.sync_database_command,         commands=['forcedsyncdb'])
+# Register all command/filter bindings onto their respective routers
+from utils.register_handlers import register_all_handlers
+register_all_handlers()
 
-# Media handlers (admin upload)
-dp.register_message_handler(document.handle_document, content_types=[types.ContentType.DOCUMENT])
-dp.register_message_handler(document.handle_video,    content_types=[types.ContentType.VIDEO])
-dp.register_message_handler(document.handle_photo,    content_types=[types.ContentType.PHOTO])
+for module in (
+    start, broadcast, caption, document,
+    getlist, folder, download, setpremium,
+    stop, about_help, sync, status, admin_tools, commands_ref, payment,
+    payment_stars, stats,
+):
+    if hasattr(module, 'router'):
+        dp.include_router(module.router)
+    else:
+        log.warning(f"Handler module {module.__name__} has no 'router' attribute — skipped.")
 
-# Dynamic /approve_<id> and /reject_<id> — work from any chat (private or group)
-dp.register_message_handler(
-    start.approve_user,
-    lambda msg: bool(msg.text) and msg.text.startswith('/approve_') and str(msg.from_user.id) in ADMIN_IDS
-)
-dp.register_message_handler(
-    start.reject_user,
-    lambda msg: bool(msg.text) and msg.text.startswith('/reject_') and str(msg.from_user.id) in ADMIN_IDS
-)
+# ── Global error handler ───────────────────────────────────────────────────
+@dp.errors()
+async def global_error_handler(event: types.ErrorEvent) -> bool:
+    """
+    Catch-all for any unhandled exception in a handler.
+    1. Logs the full traceback.
+    2. Sends a friendly message to the user (if the update has a chat).
+    3. Alerts the first admin with the error details.
+    4. Returns True to suppress the exception (keeps the bot running).
+    """
+    exception = event.exception
+    update    = event.update
 
-# Telegram Stars payment handlers
-dp.register_pre_checkout_query_handler(payment_stars.pre_checkout_handler)
-dp.register_message_handler(
-    payment_stars.successful_payment_handler,
-    content_types=[types.ContentType.SUCCESSFUL_PAYMENT],
-)
+    # Track error in monitoring
+    update_type = "callback_query" if update.callback_query else "message"
+    record_handler_error(update_type)
 
-# ── Callback query handler ─────────────────────────────────────────────────
-# ONE unified handler with NO filter — aiogram v2 lambdas as filter
-# are unreliable; a single no-filter handler always matches all callbacks.
-# start.process_callback dispatches internally by data prefix.
-dp.register_callback_query_handler(start.process_callback)
+    log.error(
+        "Unhandled exception in update %s:\n%s",
+        update,
+        traceback.format_exc(),
+    )
 
-# Unknown slash-commands (must be LAST to avoid swallowing known commands)
-dp.register_message_handler(
-    about_help.handle_invalid_command,
-    lambda msg: bool(msg.text) and msg.text.startswith('/')
-)
+    chat_id   = None
+    user_id   = None
+    user_name = None
+    cmd_text  = None
 
-# ── Startup / shutdown hooks ───────────────────────────────────────────────
+    if update.message:
+        chat_id   = update.message.chat.id
+        user_id   = update.message.from_user.id
+        user_name = update.message.from_user.username
+        cmd_text  = update.message.text
+    elif update.callback_query:
+        chat_id   = update.callback_query.message.chat.id
+        user_id   = update.callback_query.from_user.id
+        user_name = update.callback_query.from_user.username
+        cmd_text  = update.callback_query.data
+
+    if chat_id:
+        try:
+            await bot.send_message(
+                chat_id,
+                "⚠️ <b>Something went wrong on our end.</b>\n\n"
+                "This is a temporary issue — please try again in a moment.\n"
+                "If the problem continues, contact the admin.",
+            )
+        except Exception:
+            pass
+
+    if ADMIN_IDS:
+        try:
+            exc_summary = str(exception)[:300]
+            admin_msg = (
+                "🚨 <b>Bot Error Alert</b>\n\n"
+                f"<b>Exception:</b> <code>{type(exception).__name__}</code>\n"
+                f"<code>{exc_summary}</code>\n\n"
+                f"<b>User:</b> <code>{user_id}</code> (@{user_name or 'unknown'})\n"
+                f"<b>Input:</b> <code>{str(cmd_text or '')[:200]}</code>"
+            )
+            await bot.send_message(int(ADMIN_IDS[0]), admin_msg)
+        except Exception:
+            pass
+
+    return True
+
+
+# ── Startup / shutdown ─────────────────────────────────────────────────────
 from utils.webhook import on_startup, on_shutdown
 
-# ── Entry-point ────────────────────────────────────────────────────────────
+# ── Entry point ────────────────────────────────────────────────────────────
+async def main() -> None:
+    await on_startup(bot)
+    try:
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    finally:
+        await on_shutdown(bot)
+
+
 if __name__ == '__main__':
-    from aiogram import executor
-    executor.start_polling(dp, on_startup=on_startup, on_shutdown=on_shutdown)
+    asyncio.run(main())

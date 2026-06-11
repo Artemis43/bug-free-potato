@@ -1,8 +1,10 @@
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from utils.bot_ref import get_bot
 import html as _html
 import logging
 from datetime import datetime, timedelta
-from aiogram import exceptions
-from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
+
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from utils.database import db_execute, db_fetchone
 from config import ADMIN_IDS, NOTIFY_COOLDOWN_HOURS, ADMIN_GROUP_ID
 
@@ -42,8 +44,6 @@ async def notify_admins(user_id: int, username: str, first_name: str = None):
     Respects NOTIFY_COOLDOWN_HOURS — skips notification if admin was already
     notified about this user within the cooldown window.
     """
-    from main import bot
-
     # Cooldown check
     if NOTIFY_COOLDOWN_HOURS > 0:
         row = db_fetchone('SELECT last_notified FROM users WHERE user_id = %s', (user_id,))
@@ -64,11 +64,13 @@ async def notify_admins(user_id: int, username: str, first_name: str = None):
     uname_str = f"@{esc(username)}" if username else 'no username'
 
     text = (
-        f"👤 <b>New Access Request</b>\n\n"
-        f"Name: {name_str}\n"
-        f"Username: {uname_str}\n"
-        f"ID: <code>{user_id}</code>\n\n"
-        f"Use the buttons below to approve or reject."
+        f"🔔 <b>New Access Request</b>\n"
+        f"─────────────────────────\n"
+        f"👤 <b>Name:</b>     {name_str}\n"
+        f"💬 <b>Username:</b> {uname_str}\n"
+        f"🆔 <b>User ID:</b>  <code>{user_id}</code>\n"
+        f"─────────────────────────\n"
+        f"Tap a button to approve or reject."
     )
 
     # Inline approve / reject buttons on the notification itself
@@ -83,9 +85,9 @@ async def notify_admins(user_id: int, username: str, first_name: str = None):
 
     try:
         await bot.send_message(target, text, parse_mode=ParseMode.HTML, reply_markup=kb)
-    except exceptions.BotBlocked:
+    except TelegramForbiddenError:
         logging.warning(f"Could not reach admin target {target} — bot blocked.")
-    except exceptions.ChatNotFound:
+    except TelegramBadRequest:
         logging.warning(f"Admin target {target} not found.")
     except Exception as e:
         logging.error(f"Error sending approval request to {target}: {e}")
@@ -93,8 +95,6 @@ async def notify_admins(user_id: int, username: str, first_name: str = None):
 
 async def notify_admin_for_approval(user_id: int, folder_id: int, folder_name: str):
     """Ask admin to approve a one-time paid-folder download (first request)."""
-    from main import bot
-
     db_execute(
         '''
         INSERT INTO user_folder_approval (user_id, folder_id, approved, download_completed)
@@ -135,8 +135,6 @@ async def notify_admin_for_approval(user_id: int, folder_id: int, folder_name: s
 
 async def notify_admin_for_approval_again(user_id: int, folder_id: int, folder_name: str):
     """Notify admin of a *repeat* paid-folder download request."""
-    from main import bot
-
     db_execute(
         '''
         UPDATE user_folder_approval

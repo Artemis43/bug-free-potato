@@ -1,10 +1,19 @@
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from utils.keyboard import InlineBuilder
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from aiogram import Router
+from utils.bot_ref import get_bot
 import asyncio
 import logging
-from aiogram import types, exceptions
-from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import types
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram import Router
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS
 from utils.database import db_fetchall, db_execute, db_fetchone
+
+router = Router()
 
 # Telegram's flood-limit ceiling is ~30 msg/s for bots.
 # 50ms between messages = 20 msg/s — safe headroom.
@@ -25,7 +34,7 @@ async def broadcast_message(message: types.Message):
         await message.reply("You are not authorized to send broadcasts.")
         return
 
-    args = message.get_args()
+    args = (message.text.split(None, 1)[1] if message.text and len(message.text.split(None, 1)) > 1 else '')
     if not args:
         await message.reply(
             "Usage: <code>/broadcast &lt;message&gt;</code>\n\n"
@@ -67,7 +76,7 @@ async def broadcast_message(message: types.Message):
     broadcast_id = row[0] if row else None
 
     # ── Send preview to admin ─────────────────────────────────────────────────
-    kb = InlineKeyboardMarkup()
+    kb = InlineBuilder()
     kb.row(
         InlineKeyboardButton(f"✅ Send to {count} users", callback_data=f"bcast_send:{broadcast_id}"),
         InlineKeyboardButton("❌ Cancel",                callback_data=f"bcast_cancel:{broadcast_id}"),
@@ -88,7 +97,7 @@ async def broadcast_message(message: types.Message):
         f"👥 Recipients: <b>{count}</b> approved user(s)\n\n"
         "Tap <b>Send</b> to confirm, or <b>Cancel</b> to discard.",
         parse_mode=ParseMode.HTML,
-        reply_markup=kb
+        reply_markup=kb.build()
     )
 
 
@@ -96,8 +105,6 @@ async def execute_broadcast(callback_query: types.CallbackQuery, broadcast_id: i
     """Step 2 of 2: called from process_callback when admin taps [✅ Send Now].
     Fetches the pending broadcast from DB and sends it to all approved users.
     """
-    from main import bot
-
     # Load from DB
     row = db_fetchone(
         'SELECT admin_id, message_text, parse_mode FROM pending_broadcasts WHERE id = %s',
@@ -152,7 +159,7 @@ async def execute_broadcast(callback_query: types.CallbackQuery, broadcast_id: i
         try:
             await bot.send_message(user_id, text, parse_mode=parse_mode)
             success += 1
-        except exceptions.BotBlocked:
+        except TelegramForbiddenError:
             blocked += 1
         except exceptions.RetryAfter as e:
             logging.warning(f"Broadcast flood limit — waiting {e.timeout}s")
@@ -181,8 +188,6 @@ async def execute_broadcast(callback_query: types.CallbackQuery, broadcast_id: i
 
 async def cancel_broadcast(callback_query: types.CallbackQuery, broadcast_id: int):
     """Called from process_callback when admin taps [❌ Cancel]."""
-    from main import bot
-
     row = db_fetchone('SELECT admin_id FROM pending_broadcasts WHERE id = %s', (broadcast_id,))
     if row and row[0] != callback_query.from_user.id:
         await bot.answer_callback_query(callback_query.id, "Not authorized.", show_alert=True)

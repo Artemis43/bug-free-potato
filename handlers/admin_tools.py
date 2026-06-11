@@ -1,11 +1,15 @@
 import logging
 from datetime import datetime
 from aiogram import types
-from aiogram.types import ParseMode
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram import Router
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS
 from utils.database import db_fetchall, db_fetchone, db_execute
 from utils.helpers import set_current_upload_folder, esc
+
+router = Router()
 
 
 async def pending_users(message: types.Message):
@@ -75,7 +79,7 @@ async def set_upload_folder(message: types.Message):
         await message.reply("You are not authorized.")
         return
 
-    folder_name = message.get_args().strip()
+    folder_name = (message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else '')
     if not folder_name:
         await message.reply(
             "Usage: <code>/setuploadfolder &lt;folder name&gt;</code>",
@@ -107,7 +111,7 @@ async def user_info(message: types.Message):
         await message.reply("You are not authorized.")
         return
 
-    args = message.get_args().strip()
+    args = (message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else '')
     if not args:
         await message.reply(
             "Usage: <code>/userinfo &lt;user_id&gt;</code>", parse_mode=ParseMode.HTML
@@ -180,7 +184,7 @@ async def reset_cooldown(message: types.Message):
         await message.reply("You are not authorized.")
         return
 
-    args = message.get_args().strip()
+    args = (message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else '')
     if not args:
         await message.reply(
             "Usage: <code>/resetcooldown &lt;user_id&gt;</code>", parse_mode=ParseMode.HTML

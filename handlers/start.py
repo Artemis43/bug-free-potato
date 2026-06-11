@@ -1,12 +1,22 @@
+from utils.keyboard import InlineBuilder
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from aiogram import Router
+from utils.bot_ref import get_bot
 import asyncio
 import logging
-from aiogram import types, exceptions
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
+from aiogram import types
+from aiogram import Router
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram import Router
 from middlewares.authorization import is_private_chat, is_user_member, get_channel_title, invalidate_member_cache
 from utils.database import add_user_to_db, db_fetchone, db_execute, db_fetchall
 from utils.helpers import notify_admins, esc
 from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, PREMIUM_INFO_URL, ADMIN_CONTACT, VERIFY_URL, PAYMENT_MODE
 from datetime import datetime, timedelta
+
+router = Router()
+
+log = logging.getLogger(__name__)
 
 # Global throttle for auto-sync
 last_sync_time = None
@@ -44,7 +54,6 @@ async def send_sticker_safe(bot, chat_id: int, delay: float = 2.0):
 
 async def send_ui(chat_id: int, message_id: int = None,
                   is_returning: bool = False, page: int = 0):
-    from main import bot
     global last_sync_time
 
     chat = await bot.get_chat(chat_id)
@@ -88,7 +97,7 @@ async def send_ui(chat_id: int, message_id: int = None,
         '''
     )
 
-    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard = InlineBuilder()
 
     if not all_folders:
         text += (
@@ -125,9 +134,9 @@ async def send_ui(chat_id: int, message_id: int = None,
                 tag      = ""
                 btn_icon = "📁"
 
-            text += f"• <code>{safe_name}</code>{tag} — <i>{file_count} files</i>\n"
+            text += f"• <code>{safe_name}</code>{tag} — <i>{file_count} file{'s' if file_count != 1 else ''}</i>\n"
 
-            label = f"{btn_icon} {folder_name}"
+            label = f"{btn_icon} {folder_name} ({file_count})"
             if len(label) > 32:
                 label = label[:29] + "…"
             folder_buttons.append(
@@ -164,11 +173,11 @@ async def send_ui(chat_id: int, message_id: int = None,
         if message_id:
             await bot.edit_message_text(
                 chat_id=chat_id, message_id=message_id,
-                text=text, reply_markup=keyboard, parse_mode=ParseMode.HTML
+                text=text, reply_markup=keyboard.build(), parse_mode=ParseMode.HTML
             )
         else:
-            await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
-    except exceptions.MessageNotModified:
+            await bot.send_message(chat_id, text, reply_markup=keyboard.build(), parse_mode=ParseMode.HTML)
+    except TelegramBadRequest:
         pass
 
 
@@ -191,10 +200,10 @@ async def _cb_page(cq: types.CallbackQuery, bot, user_id: int) -> None:
 
     invalidate_member_cache(user_id)
     if not await is_user_member(user_id):
-        await bot.answer_callback_query(cq.id, "Please join the required channels first.")
+        await cq.answer("Please join the required channels first.")
         return
 
-    await bot.answer_callback_query(cq.id)
+    await cq.answer()
     await send_ui(user_id, cq.message.message_id, is_returning=True, page=page)
 
 
@@ -202,7 +211,7 @@ async def _cb_download(cq: types.CallbackQuery, bot, user_id: int) -> None:
     try:
         folder_id = int(cq.data.split(':', 1)[1])
     except (ValueError, IndexError):
-        await bot.answer_callback_query(cq.id, "Invalid folder.")
+        await cq.answer("Invalid folder.")
         return
 
     from handlers.download import trigger_folder_download
@@ -218,12 +227,12 @@ async def _cb_download(cq: types.CallbackQuery, bot, user_id: int) -> None:
 
 async def _cb_approve(cq: types.CallbackQuery, bot, user_id: int) -> None:
     if str(user_id) not in ADMIN_IDS:
-        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        await cq.answer("Not authorized.", show_alert=True)
         return
     try:
         target_id = int(cq.data.split(':', 1)[1])
     except (ValueError, IndexError):
-        await bot.answer_callback_query(cq.id, "Invalid user ID.")
+        await cq.answer("Invalid user ID.")
         return
 
     db_execute("UPDATE users SET status = 'approved' WHERE user_id = %s", (target_id,))
@@ -248,7 +257,7 @@ async def _cb_approve(cq: types.CallbackQuery, bot, user_id: int) -> None:
             "🎉 <b>Access Granted!</b>\n\nYou've been approved to use the bot.\n\n👉 Tap /start to get started!",
             parse_mode=ParseMode.HTML,
         )
-    except exceptions.BotBlocked:
+    except TelegramForbiddenError:
         logging.warning(f"User {target_id} has blocked the bot.")
     except Exception as e:
         logging.error(f"Error notifying user {target_id} of approval: {e}")
@@ -256,12 +265,12 @@ async def _cb_approve(cq: types.CallbackQuery, bot, user_id: int) -> None:
 
 async def _cb_reject(cq: types.CallbackQuery, bot, user_id: int) -> None:
     if str(user_id) not in ADMIN_IDS:
-        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        await cq.answer("Not authorized.", show_alert=True)
         return
     try:
         target_id = int(cq.data.split(':', 1)[1])
     except (ValueError, IndexError):
-        await bot.answer_callback_query(cq.id, "Invalid user ID.")
+        await cq.answer("Invalid user ID.")
         return
 
     db_execute("UPDATE users SET status = 'rejected' WHERE user_id = %s", (target_id,))
@@ -282,7 +291,7 @@ async def _cb_reject(cq: types.CallbackQuery, bot, user_id: int) -> None:
             target_id,
             f"Your access request was not approved. 😢\n\nIf you think this is a mistake, contact us: {ADMIN_CONTACT}",
         )
-    except exceptions.BotBlocked:
+    except TelegramForbiddenError:
         logging.warning(f"User {target_id} has blocked the bot.")
     except Exception as e:
         logging.error(f"Error notifying user {target_id} of rejection: {e}")
@@ -290,13 +299,13 @@ async def _cb_reject(cq: types.CallbackQuery, bot, user_id: int) -> None:
 
 async def _cb_folder_approve(cq: types.CallbackQuery, bot, user_id: int) -> None:
     if str(user_id) not in ADMIN_IDS:
-        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        await cq.answer("Not authorized.", show_alert=True)
         return
     try:
         _, target_id, folder_id = cq.data.split(':', 2)
         target_id, folder_id = int(target_id), int(folder_id)
     except (ValueError, IndexError):
-        await bot.answer_callback_query(cq.id, "Invalid data.")
+        await cq.answer("Invalid data.")
         return
 
     db_execute(
@@ -331,7 +340,7 @@ async def _cb_folder_approve(cq: types.CallbackQuery, bot, user_id: int) -> None
             f"You get <b>1 download</b> at Premium speed.\n\nUse /start and tap the folder to begin.",
             parse_mode=ParseMode.HTML,
         )
-    except exceptions.BotBlocked:
+    except TelegramForbiddenError:
         logging.warning(f"User {target_id} has blocked the bot.")
     except Exception as e:
         logging.error(f"Error notifying user {target_id} of paid-folder approval: {e}")
@@ -339,13 +348,13 @@ async def _cb_folder_approve(cq: types.CallbackQuery, bot, user_id: int) -> None
 
 async def _cb_folder_reject(cq: types.CallbackQuery, bot, user_id: int) -> None:
     if str(user_id) not in ADMIN_IDS:
-        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        await cq.answer("Not authorized.", show_alert=True)
         return
     try:
         _, target_id, folder_id = cq.data.split(':', 2)
         target_id, folder_id = int(target_id), int(folder_id)
     except (ValueError, IndexError):
-        await bot.answer_callback_query(cq.id, "Invalid data.")
+        await cq.answer("Invalid data.")
         return
 
     db_execute(
@@ -374,7 +383,7 @@ async def _cb_folder_reject(cq: types.CallbackQuery, bot, user_id: int) -> None:
             f"If you think this is a mistake, contact us: {ADMIN_CONTACT}",
             parse_mode=ParseMode.HTML,
         )
-    except exceptions.BotBlocked:
+    except TelegramForbiddenError:
         logging.warning(f"User {target_id} has blocked the bot.")
     except Exception as e:
         logging.error(f"Error notifying user {target_id} of paid-folder rejection: {e}")
@@ -382,12 +391,12 @@ async def _cb_folder_reject(cq: types.CallbackQuery, bot, user_id: int) -> None:
 
 async def _cb_delete_confirm(cq: types.CallbackQuery, bot, user_id: int) -> None:
     if str(user_id) not in ADMIN_IDS:
-        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        await cq.answer("Not authorized.", show_alert=True)
         return
 
     pending = _pending_deletions.pop(user_id, None)
     if not pending:
-        await bot.answer_callback_query(cq.id)
+        await cq.answer()
         await bot.edit_message_text(
             "Session expired. Please use /deletefolder again.",
             chat_id=cq.message.chat.id, message_id=cq.message.message_id,
@@ -396,13 +405,13 @@ async def _cb_delete_confirm(cq: types.CallbackQuery, bot, user_id: int) -> None
 
     folder_name, folder_id = pending
     from handlers.folder import execute_folder_deletion
-    await bot.answer_callback_query(cq.id, "🗑 Deleting…")
+    await cq.answer("🗑 Deleting…")
     await execute_folder_deletion(bot, cq.message, folder_id, folder_name)
 
 
 async def _cb_delete_cancel(cq: types.CallbackQuery, bot, user_id: int) -> None:
     _pending_deletions.pop(user_id, None)
-    await bot.answer_callback_query(cq.id, "Cancelled.")
+    await cq.answer("Cancelled.")
     try:
         await bot.edit_message_text(
             "❌ Folder deletion cancelled.",
@@ -414,12 +423,12 @@ async def _cb_delete_cancel(cq: types.CallbackQuery, bot, user_id: int) -> None:
 
 async def _cb_broadcast_send(cq: types.CallbackQuery, bot, user_id: int) -> None:
     if str(user_id) not in ADMIN_IDS:
-        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        await cq.answer("Not authorized.", show_alert=True)
         return
     try:
         broadcast_id = int(cq.data.split(':', 1)[1])
     except (ValueError, IndexError):
-        await bot.answer_callback_query(cq.id, "Invalid broadcast ID.")
+        await cq.answer("Invalid broadcast ID.")
         return
     from handlers.broadcast import execute_broadcast
     asyncio.create_task(execute_broadcast(cq, broadcast_id))
@@ -427,12 +436,12 @@ async def _cb_broadcast_send(cq: types.CallbackQuery, bot, user_id: int) -> None
 
 async def _cb_broadcast_cancel(cq: types.CallbackQuery, bot, user_id: int) -> None:
     if str(user_id) not in ADMIN_IDS:
-        await bot.answer_callback_query(cq.id, "Not authorized.", show_alert=True)
+        await cq.answer("Not authorized.", show_alert=True)
         return
     try:
         broadcast_id = int(cq.data.split(':', 1)[1])
     except (ValueError, IndexError):
-        await bot.answer_callback_query(cq.id, "Invalid broadcast ID.")
+        await cq.answer("Invalid broadcast ID.")
         return
     from handlers.broadcast import cancel_broadcast
     await cancel_broadcast(cq, broadcast_id)
@@ -458,11 +467,47 @@ async def _cb_stars_cancel(cq: types.CallbackQuery, bot, user_id: int) -> None:
     await handle_stars_plan_callback(cq)
 
 
+async def _cb_cancel_download(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    """Cancel Download button — signals the active download to stop."""
+    import utils.progress as progress
+    try:
+        # callback_data = "cancel_dl:<chat_id>"
+        target_chat_id = int(cq.data.split(':', 1)[1])
+    except (ValueError, IndexError):
+        target_chat_id = cq.message.chat.id
+
+    if progress.is_downloading(target_chat_id):
+        progress.request_cancel(target_chat_id)
+        await bot.answer_callback_query(
+            cq.id, "⏹ Download cancelled — stopping after current file.", show_alert=False
+        )
+    else:
+        await cq.answer("No active download to cancel.", show_alert=False)
+
+
+async def _cb_info_status(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    """Show status card inline (edit the current message)."""
+    await cq.answer()
+    from handlers.status import build_status_text
+    try:
+        text, kb = await build_status_text(user_id, bot)
+        await bot.edit_message_text(
+            chat_id=cq.message.chat.id,
+            message_id=cq.message.message_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=kb.build(),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        pass
+
+
 async def _cb_info_premium(cq: types.CallbackQuery, bot, user_id: int) -> None:
     """Show the premium purchase screen, routed by PAYMENT_MODE."""
-    await bot.answer_callback_query(cq.id)
+    await cq.answer()
 
-    kb = InlineKeyboardMarkup(row_width=1)
+    kb = InlineBuilder()
 
     if PAYMENT_MODE == 'stars':
         # -- Telegram Stars mode -----------------------------------------------
@@ -530,15 +575,15 @@ async def _cb_info_premium(cq: types.CallbackQuery, bot, user_id: int) -> None:
                 f"<b>How to subscribe:</b>\n  {how_to}\n\n"
                 f"<i>Tap 🔙 Back to Menu to return to the folder list.</i>"
             ),
-            parse_mode=ParseMode.HTML, reply_markup=kb,
+            parse_mode=ParseMode.HTML, reply_markup=kb.build(),
         )
     except Exception:
         pass
 
 
 async def _cb_info_verify(cq: types.CallbackQuery, bot, user_id: int) -> None:
-    await bot.answer_callback_query(cq.id)
-    kb = InlineKeyboardMarkup()
+    await cq.answer()
+    kb = InlineBuilder()
     kb.row(InlineKeyboardButton("📨 Message Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
     kb.row(InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main"))
     try:
@@ -559,49 +604,49 @@ async def _cb_info_verify(cq: types.CallbackQuery, bot, user_id: int) -> None:
                 "<i>Once approved you'll get a notification here.\n"
                 "Tap 🔙 Back to Menu to return.</i>"
             ),
-            parse_mode=ParseMode.HTML, reply_markup=kb,
+            parse_mode=ParseMode.HTML, reply_markup=kb.build(),
         )
     except Exception:
         pass
 
 
 async def _cb_info_about(cq: types.CallbackQuery, bot, user_id: int) -> None:
-    await bot.answer_callback_query(cq.id)
+    await cq.answer()
     from handlers.about_help import get_about_content
-    kb = InlineKeyboardMarkup()
+    kb = InlineBuilder()
     kb.row(InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main"))
     try:
         await bot.edit_message_text(
             chat_id=cq.message.chat.id, message_id=cq.message.message_id,
-            text=get_about_content(), parse_mode=ParseMode.HTML, reply_markup=kb
+            text=get_about_content(), parse_mode=ParseMode.HTML, reply_markup=kb.build()
         )
     except Exception:
         pass
 
 
 async def _cb_info_help(cq: types.CallbackQuery, bot, user_id: int) -> None:
-    await bot.answer_callback_query(cq.id)
+    await cq.answer()
     from handlers.about_help import get_help_content
-    kb = InlineKeyboardMarkup()
+    kb = InlineBuilder()
     kb.row(InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main"))
     try:
         await bot.edit_message_text(
             chat_id=cq.message.chat.id, message_id=cq.message.message_id,
-            text=get_help_content(), parse_mode=ParseMode.HTML, reply_markup=kb
+            text=get_help_content(), parse_mode=ParseMode.HTML, reply_markup=kb.build()
         )
     except Exception:
         pass
 
 
 async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
-    await bot.answer_callback_query(cq.id)
+    await cq.answer()
 
     user_row = db_fetchone('SELECT status, first_name FROM users WHERE user_id = %s', (user_id,))
     user_status = user_row[0] if user_row else 'pending'
     first_name  = user_row[1] if user_row else 'there'
 
     if user_status == 'pending':
-        kb = InlineKeyboardMarkup()
+        kb = InlineBuilder()
         kb.row(
             InlineKeyboardButton("🎓 How to Verify", callback_data="info_verify"),
             InlineKeyboardButton("💬 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"),
@@ -617,7 +662,7 @@ async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
                     "Tap <b>How to Verify</b> below to see what to send them.\n\n"
                     "You'll be notified here as soon as your request is reviewed! ✅"
                 ),
-                parse_mode=ParseMode.HTML, reply_markup=kb,
+                parse_mode=ParseMode.HTML, reply_markup=kb.build(),
             )
         except Exception:
             pass
@@ -636,7 +681,7 @@ async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
     else:
         invalidate_member_cache(user_id)
         if not await is_user_member(user_id):
-            kb = InlineKeyboardMarkup(row_width=1)
+            kb = InlineBuilder()
             for channel in REQUIRED_CHANNELS:
                 title = await get_channel_title(channel)
                 kb.add(InlineKeyboardButton(
@@ -650,7 +695,7 @@ async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
                         "Please join our required channels to continue using the bot 👇\n\n"
                         "After joining all channels, tap the button below to refresh."
                     ),
-                    reply_markup=kb
+                    reply_markup=kb.build()
                 )
             except Exception:
                 pass
@@ -674,10 +719,12 @@ _CB_HANDLERS = {
     "pay_cancel":   _cb_pay_cancel,
     "stars_plan":   _cb_stars_plan,
     "stars_cancel": _cb_stars_cancel,
+    "cancel_dl":    _cb_cancel_download,
     "info_premium": _cb_info_premium,
     "info_verify":  _cb_info_verify,
     "info_about":   _cb_info_about,
     "info_help":    _cb_info_help,
+    "info_status":  _cb_info_status,
     "close_info":   _cb_back_to_main,
     "back_to_main": _cb_back_to_main,
 }
@@ -689,7 +736,6 @@ _CB_HANDLERS = {
 
 async def process_callback(callback_query: types.CallbackQuery):
     """Route every inline keyboard callback via _CB_HANDLERS dict-dispatch."""
-    from main import bot
     user_id = callback_query.from_user.id
     prefix  = (callback_query.data or '').split(':')[0]
     handler = _CB_HANDLERS.get(prefix)
@@ -705,13 +751,16 @@ async def process_callback(callback_query: types.CallbackQuery):
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def handle_start(message: types.Message):
-    from main import bot
     if not is_private_chat(message):
         return
 
     user_id    = message.from_user.id
     username   = message.from_user.username
     first_name = message.from_user.first_name
+    name       = esc(first_name or 'there')
+
+    # Show typing indicator while we process
+    await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
 
     add_user_to_db(user_id, username=username, first_name=first_name)
 
@@ -720,35 +769,81 @@ async def handle_start(message: types.Message):
         (user_id,)
     )
     if not user:
-        await message.answer("Something went wrong. Please try again.")
+        await message.answer(
+            "⚠️ <b>Something went wrong.</b>\n\n"
+            "Please try again in a moment.",
+            parse_mode=ParseMode.HTML
+        )
         return
 
     status, welcome_sent = user
 
+    # ── PENDING ────────────────────────────────────────────────────────────
     if status == 'pending':
-        kb = InlineKeyboardMarkup()
-        kb.row(
-            InlineKeyboardButton("🎓 How to Verify", callback_data="info_verify"),
-            InlineKeyboardButton("💬 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"),
+        # Check how long ago they registered
+        notified_row = db_fetchone(
+            'SELECT last_notified FROM users WHERE user_id = %s', (user_id,)
         )
-        await message.answer(
-            f"Hello {esc(first_name or 'there')}! 👋\n\n"
-            "<b>I'm The Medical Content Bot</b> ✨\n\n"
-            "Access is limited to verified medical students to protect the content. 🙃\n\n"
-            "Your request has been sent to an admin.\n"
-            "Tap <b>How to Verify</b> below to see what to send them.\n\n"
-            "You'll be notified here as soon as your request is reviewed! ✅",
-            parse_mode=ParseMode.HTML,
-            reply_markup=kb
-        )
+        last_notified = notified_row[0] if notified_row and notified_row[0] else None
+
+        if last_notified:
+            # Returning pending user — give a status update, not a repeat pitch
+            if hasattr(last_notified, 'tzinfo') and last_notified.tzinfo:
+                last_notified = last_notified.replace(tzinfo=None)
+            hours_waiting = int((datetime.now() - last_notified).total_seconds() // 3600)
+            wait_str = f"{hours_waiting}h" if hours_waiting < 24 else f"{hours_waiting // 24}d"
+
+            kb = InlineBuilder()
+            kb.row(
+                InlineKeyboardButton("✅ How to Verify", callback_data="info_verify"),
+                InlineKeyboardButton("💬 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"),
+            )
+            await message.answer(
+                f"⏳ <b>Still waiting, {name}!</b>\n\n"
+                f"Your access request has been pending for <b>~{wait_str}</b>.\n\n"
+                "📋 An admin will review it and notify you here.\n"
+                "If it's been a long time, tap <b>Contact Admin</b> to follow up.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=kb.build()
+            )
+        else:
+            # Brand-new pending user — full onboarding message
+            kb = InlineBuilder()
+            kb.row(
+                InlineKeyboardButton("✅ How to Verify", callback_data="info_verify"),
+                InlineKeyboardButton("💬 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"),
+            )
+            await message.answer(
+                f"👋 <b>Hello, {name}!</b>\n\n"
+                "🏥 <b>Welcome to the Medical Content Bot</b>\n\n"
+                "This bot gives verified medical students access to an organised "
+                "archive of study materials — directly in Telegram.\n\n"
+                "🔐 <b>Access is verified-students only</b> to protect content creators.\n\n"
+                "📋 <b>What happens next:</b>\n"
+                "  1️⃣ Your request has been sent to an admin\n"
+                "  2️⃣ Tap <b>How to Verify</b> below to send your proof\n"
+                "  3️⃣ You'll be notified here once approved\n\n"
+                "⏱️ <i>Reviews typically take a few hours.</i>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=kb.build()
+            )
         await notify_admins(user_id, username, first_name)
 
+    # ── APPROVED ───────────────────────────────────────────────────────────
     elif status == 'approved':
         if not welcome_sent:
+            # First-ever login after approval — full feature tour
             await message.answer(
-                "🎉 <b>Welcome!</b> You've been granted access to the bot.\n\n"
-                "Use /help to learn how to download content.",
-                parse_mode=ParseMode.HTML
+                f"🎉 <b>Welcome, {name}! You're approved!</b>\n\n"
+                "Here's what you can do:\n\n"
+                "📂 <b>Browse Folders</b> — tap any folder button to download all its files\n"
+                "⬇️ <b>/download \u003cfolder name\u003e</b> — download by typing the name\n"
+                "👤 <b>/status</b> — check your account & cooldown\n"
+                "❓ <b>/help</b> — full usage guide\n\n"
+                "💾 <b>Tip:</b> Forward received files to your <b>Saved Messages</b> — "
+                "they're deleted from the chat after a few minutes!",
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
             )
             db_execute(
                 'UPDATE users SET welcome_sent = TRUE WHERE user_id = %s',
@@ -757,26 +852,39 @@ async def handle_start(message: types.Message):
 
         invalidate_member_cache(user_id)
         if not await is_user_member(user_id):
-            await send_sticker_safe(bot, message.chat.id, delay=3)
-            kb = InlineKeyboardMarkup(row_width=1)
+            await send_sticker_safe(bot, message.chat.id, delay=2)
+            kb = InlineBuilder()
             for channel in REQUIRED_CHANNELS:
                 title = await get_channel_title(channel)
                 kb.add(InlineKeyboardButton(
-                    f"📢 {title}", url=f"https://t.me/{channel.lstrip('@')}"
+                    f"📢 Join: {title}", url=f"https://t.me/{channel.lstrip('@')}"
                 ))
+            kb.add(InlineKeyboardButton("✅ I've Joined — Refresh", callback_data="pg:0"))
             await message.reply(
-                "Please join our channels to continue using the bot 👇\n\n"
-                "After joining, send /start again.",
-                reply_markup=kb
+                "📢 <b>Channel Subscription Required</b>\n\n"
+                "You need to join our channel(s) to access content.\n"
+                "Tap the button below, then tap <b>I've Joined</b>.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=kb.build()
             )
         else:
             await send_sticker_safe(bot, message.chat.id, delay=2)
             await send_ui(message.chat.id, is_returning=bool(welcome_sent))
 
+    # ── REJECTED ───────────────────────────────────────────────────────────
     elif status == 'rejected':
+        kb = InlineBuilder()
+        kb.add(InlineKeyboardButton(
+            "💬 Appeal to Admin",
+            url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"
+        ))
         await message.answer(
-            f"Your access request was not approved. 😢\n\n"
-            f"If you think this is a mistake, contact us: {ADMIN_CONTACT}"
+            f"❌ <b>Access Not Approved</b>\n\n"
+            f"Hi {name}, your access request was not approved at this time.\n\n"
+            "If you believe this is a mistake or would like to appeal, "
+            "please contact the admin directly.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=kb.build()
         )
 
 
@@ -785,7 +893,6 @@ async def handle_start(message: types.Message):
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def approve_user(message: types.Message):
-    from main import bot
     try:
         target_id = int(message.text.split('_')[1])
     except (IndexError, ValueError):
@@ -803,16 +910,15 @@ async def approve_user(message: types.Message):
             "👉 Tap /start to get started!",
             parse_mode=ParseMode.HTML
         )
-    except exceptions.BotBlocked:
+    except TelegramForbiddenError:
         logging.warning(f"User {target_id} has blocked the bot.")
-    except exceptions.ChatNotFound:
+    except TelegramBadRequest:
         logging.warning(f"User {target_id} chat not found.")
     except Exception as e:
         logging.error(f"Error notifying user {target_id} of approval: {e}")
 
 
 async def reject_user(message: types.Message):
-    from main import bot
     try:
         target_id = int(message.text.split('_')[1])
     except (IndexError, ValueError):
@@ -828,9 +934,9 @@ async def reject_user(message: types.Message):
             f"Your access request was not approved. 😢\n\n"
             f"If you think this is a mistake, contact us: {ADMIN_CONTACT}"
         )
-    except exceptions.BotBlocked:
+    except TelegramForbiddenError:
         logging.warning(f"User {target_id} has blocked the bot.")
-    except exceptions.ChatNotFound:
+    except TelegramBadRequest:
         logging.warning(f"User {target_id} chat not found.")
     except Exception as e:
         logging.error(f"Error notifying user {target_id} of rejection: {e}")

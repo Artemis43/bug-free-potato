@@ -1,10 +1,18 @@
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from utils.keyboard import InlineBuilder
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from aiogram import Router
 import logging
-from aiogram import types, exceptions
-from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import types
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram import Router
 from middlewares.authorization import is_private_chat
 from config import ADMIN_IDS, CHANNEL_ID
 from utils.database import db_fetchone, db_fetchall, db_execute
 from utils.helpers import set_current_upload_folder, esc
+
+router = Router()
 
 # In-memory pending deletions: { user_id: (folder_name, folder_id) }
 # NOTE: _pending_deletions is now managed in start.py so callbacks route there.
@@ -20,7 +28,7 @@ async def create_folder(message: types.Message):
 
     # Parse flags (PREMIUM, PAID) from the END of the args so that
     # multi-word names like "Human Anatomy PREMIUM" are handled correctly.
-    words = message.get_args().split()
+    words = (message.text.split(None, 1)[1].split() if message.text and len(message.text.split(None, 1)) > 1 else [])
 
     premium        = False
     admin_approval = False
@@ -83,7 +91,7 @@ async def rename_folder(message: types.Message):
         await message.reply("You are not authorized to rename folders.")
         return
 
-    args = message.get_args().split(',')
+    args = (message.text.split(None, 1)[1].split(',') if message.text and len(message.text.split(None, 1)) > 1 else [])
     if len(args) != 2:
         await message.reply(
             "Usage: <code>/renamefolder &lt;current_name&gt;,&lt;new_name&gt;</code>",
@@ -128,7 +136,7 @@ async def delete_folder(message: types.Message):
         await message.reply("You are not authorized to delete folders.")
         return
 
-    folder_name = message.get_args().strip()
+    folder_name = (message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else '')
     if not folder_name:
         await message.reply(
             "Usage: <code>/deletefolder &lt;folder name&gt;</code>",
@@ -150,7 +158,7 @@ async def delete_folder(message: types.Message):
     from handlers.start import _pending_deletions
     _pending_deletions[user_id] = (folder_name, folder_id)
 
-    kb = InlineKeyboardMarkup()
+    kb = InlineBuilder()
     kb.row(
         InlineKeyboardButton("✅ Yes, delete", callback_data=f"dfc:{folder_id}"),
         InlineKeyboardButton("❌ Cancel",       callback_data="dfc_cancel"),
@@ -162,7 +170,7 @@ async def delete_folder(message: types.Message):
         f"This will permanently delete the folder and all {file_count} file(s) "
         f"from the archive channel. This <b>cannot be undone</b>.",
         parse_mode=ParseMode.HTML,
-        reply_markup=kb
+        reply_markup=kb.build()
     )
 
 
@@ -188,7 +196,7 @@ async def execute_folder_deletion(bot, original_message, folder_id: int, folder_
         try:
             await bot.delete_message(CHANNEL_ID, msg_id)
             deleted_count += 1
-        except exceptions.MessageToDeleteNotFound:
+        except TelegramBadRequest:
             pass
         except Exception as e:
             logging.error(f"Error deleting channel message {msg_id}: {e}")

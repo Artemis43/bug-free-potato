@@ -1,13 +1,16 @@
+from utils.bot_ref import get_bot
 import logging
 from aiogram import types
+from aiogram import Router
 from config import ADMIN_IDS, REQUIRED_CHANNELS, CHANNEL_ID, DEFAULT_CAPTION
 from middlewares.authorization import is_private_chat, is_user_member
 from utils.database import db_fetchone, db_execute
 from utils.helpers import get_current_upload_folder
 
+router = Router()
+
 
 async def handle_upload(message: types.Message, file_type: str):
-    from main import bot
     if not is_private_chat(message):
         return
 
