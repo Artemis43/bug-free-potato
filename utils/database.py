@@ -207,7 +207,13 @@ def initialize_database():
         _safe_alter(cur, 'files', 'message_id',              'INTEGER')
         _safe_alter(cur, 'files', 'file_type',               "TEXT DEFAULT 'document'")
         _safe_alter(cur, 'payment_orders', 'payment_method', "TEXT DEFAULT 'razorpay'")
-        _safe_alter(cur, 'users', 'created_at',              "TIMESTAMPTZ DEFAULT NOW()")
+        # Add created_at nullable so pre-existing users keep NULL (their true
+        # signup time is unknown) rather than all being backfilled to the
+        # migration timestamp — which would make /stats report every user as
+        # "new today". New rows still default to NOW(). The /stats counts use
+        # `created_at >= …`, which correctly excludes the NULL legacy rows.
+        _safe_alter(cur, 'users', 'created_at',              "TIMESTAMPTZ")
+        cur.execute("ALTER TABLE public.users ALTER COLUMN created_at SET DEFAULT NOW()")
 
         # ── Migration: replace TEXT upload-folder name with integer FK ────────
         _safe_alter(cur, 'users', 'current_upload_folder_id',
@@ -248,14 +254,24 @@ def initialize_database():
 
 
 def _safe_alter(cur, table: str, column: str, col_type: str):
-    """Add a column to a table if it doesn't already exist (idempotent)."""
+    """Add a column to a table if it doesn't already exist (idempotent).
+
+    The existence check is scoped to the 'public' schema (where all of this
+    bot's tables live). This is essential on Supabase/Postgres: other schemas
+    such as `auth` ship their own `users` table with overlapping column names
+    (e.g. auth.users.created_at). An unscoped check would match that row and
+    wrongly conclude the column already exists, silently skipping the ALTER on
+    public.users. The ALTER is likewise schema-qualified so it targets exactly
+    the table we checked.
+    """
     cur.execute(
-        "SELECT 1 FROM information_schema.columns WHERE table_name=%s AND column_name=%s",
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = %s AND column_name = %s",
         (table, column)
     )
     if not cur.fetchone():
-        cur.execute(f'ALTER TABLE {table} ADD COLUMN {column} {col_type}')
-        logging.info(f"Migration: added column {table}.{column}")
+        cur.execute(f'ALTER TABLE public.{table} ADD COLUMN {column} {col_type}')
+        logging.info(f"Migration: added column public.{table}.{column}")
 
 
 # ── Query helpers ──────────────────────────────────────────────────────────────
