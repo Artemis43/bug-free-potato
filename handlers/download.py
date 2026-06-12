@@ -16,6 +16,7 @@ from middlewares.authorization import (
     is_user_member,
 )
 from utils.bot_ref import get_bot
+from utils.bots import get_current_bot_pk, get_servable_locations
 from utils.database import db_execute, db_fetchall, db_fetchone
 from utils.helpers import esc, notify_admin_for_approval, notify_admin_for_approval_again
 from utils.keyboard import InlineBuilder
@@ -23,6 +24,40 @@ import utils.progress as progress
 
 log = logging.getLogger(__name__)
 router = Router()
+
+
+async def _deliver_file(bot, chat_id: int, locations):
+    """Copy a file to the user from the first working storage channel.
+
+    ``locations`` is an ordered list of ``(src_chat_id, src_message_id)`` the
+    serving bot may copy from. Returns ``(sent, user_blocked)``:
+      - ``sent`` — the copy_message result, or None if no channel could serve it
+      - ``user_blocked`` — True if the user has blocked the bot (caller aborts)
+
+    Trying each channel in turn is the delivery-time redundancy: if one channel
+    was taken down or the bot lost access, the next copy still delivers.
+    """
+    for src_chat_id, src_msg_id in locations:
+        try:
+            sent = await bot.copy_message(chat_id, src_chat_id, src_msg_id)
+            return sent, False
+        except TelegramForbiddenError as e:
+            # "bot was blocked by the user" is about the destination — abort.
+            # Anything else means we lost access to this source channel; fall
+            # back to the next one.
+            if 'block' in str(e).lower():
+                return None, True
+            log.warning(f"No access to channel {src_chat_id}: {e}; trying next channel")
+            continue
+        except TelegramBadRequest as e:
+            log.warning(f"Copy of msg {src_msg_id} from {src_chat_id} failed: {e}; trying next channel")
+            continue
+        except Exception as e:
+            log.error(f"Unexpected error copying from {src_chat_id}: {e}")
+            continue
+    return None, False
+
+
 async def _run_download(
     bot, chat_id: int, user_id: int,
     folder_id: int, folder_name: str,
@@ -55,8 +90,12 @@ async def _run_download(
         pass
 
     # ── Fetch files first so we know the total ────────────────────────────
+    # We fetch the logical file id and resolve a storage channel to copy from
+    # per file at send time (see the loop). file_id is NOT used for delivery —
+    # Telegram file_ids are bot-specific, so files are served via copy_message
+    # from a storage channel this bot administers.
     files = db_fetchall(
-        'SELECT file_id, file_name, caption, file_type FROM files WHERE folder_id = %s',
+        'SELECT id, file_name FROM files WHERE folder_id = %s ORDER BY id',
         (folder_id,)
     )
     if not files:
@@ -140,31 +179,33 @@ async def _run_download(
 
     # ── Send files with live progress ─────────────────────────────────────
     messages_to_delete: list[int] = []
+    unavailable = 0
+    bot_pk = get_current_bot_pk()
+    if bot_pk is None:
+        log.error("This bot is not registered (bot_pk is None); cannot serve files.")
 
-    for index, (file_id, file_name, caption, file_type) in enumerate(files):
+    for index, (file_pk, file_name) in enumerate(files):
         # Check for cancel signal
         if progress.is_cancelled(chat_id):
             log.info(f"Download cancelled by user {user_id} at file {index + 1}/{n}")
             break
 
-        try:
-            if file_type == 'document':
-                sent = await bot.send_document(chat_id, file_id, caption=caption)
-            elif file_type == 'video':
-                sent = await bot.send_video(chat_id, file_id, caption=caption)
-            elif file_type == 'photo':
-                sent = await bot.send_photo(chat_id, file_id, caption=caption)
-            else:
-                log.warning(f"Unknown file_type '{file_type}' for file_id {file_id} — skipping.")
-                continue
-            messages_to_delete.append(sent.message_id)
-        except TelegramForbiddenError:
+        # Serve by copying the file from a storage channel THIS bot is paired
+        # with, trying each in turn — that fallback IS the redundancy (see
+        # _deliver_file). copy_message preserves the stored caption.
+        locations = get_servable_locations(file_pk, bot_pk) if bot_pk else []
+        sent, user_blocked = await _deliver_file(bot, chat_id, locations)
+
+        if user_blocked:
             log.warning(f"User {user_id} blocked bot mid-download.")
             break
-        except Exception as e:
-            log.error(f"Error sending file {file_id}: {e}")
+
+        if sent is None:
+            unavailable += 1
+            log.warning(f"File {file_pk} ('{file_name}') has no servable copy for bot pk={bot_pk}.")
             continue
 
+        messages_to_delete.append(sent.message_id)
         progress.increment_sent(chat_id)
 
         # Update progress message every file (throttle to avoid flood)
@@ -212,6 +253,8 @@ async def _run_download(
                 f"\u23f3 Files will be <b>auto-deleted in {delete_time // 60} min</b>.\n"
                 f"\U0001f4be Forward them to <b>Saved Messages</b> now!"
             )
+            if unavailable:
+                body += f"\n\n\u26a0\ufe0f {unavailable} file(s) couldn't be served right now."
         else:
             body = "\u26a0\ufe0f Download was cancelled. No further files will be sent."
 

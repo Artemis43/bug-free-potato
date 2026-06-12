@@ -154,6 +154,86 @@ class TestRateLimitMiddleware:
         result = await middleware(handler, non_msg, {})
         handler.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_admin_exempt_from_rate_limit(self):
+        """Admins are never throttled — bulk/album uploads must not be dropped."""
+        import time
+        from middlewares import rate_limit as rl
+        from middlewares.rate_limit import RateLimitMiddleware
+        from aiogram.types import Message
+        middleware = RateLimitMiddleware()
+        handler = AsyncMock(return_value="ok")
+        msg = _make_message(user_id=999888777)  # admin id from conftest ADMINS
+
+        # A very recent last action would drop a normal user; the admin passes.
+        rl._last_action[msg.from_user.id] = time.monotonic() - 0.01
+        with patch("middlewares.rate_limit.isinstance",
+                   side_effect=lambda obj, cls: cls is Message or False):
+            result = await middleware(handler, msg, {})
+        handler.assert_awaited_once()
+        assert result == "ok"
+
+
+# ── utils/media_group (album aggregation) ───────────────────────────────────
+
+class TestMediaGroupCollect:
+    def setup_method(self):
+        import utils.media_group as mg
+        mg._buffers.clear()
+
+    @pytest.mark.asyncio
+    async def test_single_message_processes_immediately(self):
+        """A lone file (no media_group_id) is processed at once as a batch of 1."""
+        from utils.media_group import collect_media_group
+        msg = MagicMock()
+        msg.media_group_id = None
+        calls = []
+
+        async def process(batch):
+            calls.append(batch)
+
+        await collect_media_group(msg, process)
+        assert calls == [[msg]]
+
+    @pytest.mark.asyncio
+    async def test_album_batched_into_single_call(self):
+        """All items of one album are flushed together as a single batch."""
+        import asyncio
+        from utils.media_group import collect_media_group
+        calls = []
+
+        async def process(batch):
+            calls.append(batch)
+
+        msgs = []
+        for _ in range(3):
+            m = MagicMock()
+            m.media_group_id = "ALBUM1"
+            msgs.append(m)
+        for m in msgs:
+            await collect_media_group(m, process, window=0.05)
+
+        assert calls == []          # still buffering within the window
+        await asyncio.sleep(0.15)
+        assert len(calls) == 1
+        assert calls[0] == msgs     # all three, in arrival order
+
+    @pytest.mark.asyncio
+    async def test_separate_albums_get_separate_batches(self):
+        import asyncio
+        from utils.media_group import collect_media_group
+        calls = []
+
+        async def process(batch):
+            calls.append(batch)
+
+        a = MagicMock(); a.media_group_id = "A"
+        b = MagicMock(); b.media_group_id = "B"
+        await collect_media_group(a, process, window=0.05)
+        await collect_media_group(b, process, window=0.05)
+        await asyncio.sleep(0.15)
+        assert len(calls) == 2
+
 
 # ── handlers/stats ─────────────────────────────────────────────────────────
 

@@ -8,7 +8,7 @@ from aiogram import Router
 from aiogram.enums import ParseMode
 from aiogram import Router
 from middlewares.authorization import is_private_chat
-from config import ADMIN_IDS, CHANNEL_ID
+from config import ADMIN_IDS
 from utils.database import db_fetchone, db_fetchall, db_execute
 from utils.helpers import set_current_upload_folder, esc
 
@@ -186,28 +186,41 @@ async def execute_folder_deletion(bot, original_message, folder_id: int, folder_
         )
         return
 
-    message_ids   = db_fetchall('SELECT message_id FROM files WHERE folder_id = %s', (folder_id,))
-    total_msgs    = len(message_ids)
+    # Gather every physical copy of this folder's files across ALL storage
+    # channels (active or not — a disabled channel may still hold messages we
+    # should clean up). One file can have several copies; we delete each.
+    locations = db_fetchall(
+        '''
+        SELECT sc.chat_id, fl.message_id
+        FROM file_locations fl
+        JOIN files f             ON f.id = fl.file_pk
+        JOIN storage_channels sc ON sc.id = fl.channel_id
+        WHERE f.folder_id = %s
+        ''',
+        (folder_id,)
+    )
+    total_copies  = len(locations)
     deleted_count = 0
 
-    for (msg_id,) in message_ids:
+    for chat_id, msg_id in locations:
         if msg_id is None:
             continue
         try:
-            await bot.delete_message(CHANNEL_ID, msg_id)
+            await bot.delete_message(chat_id, msg_id)
             deleted_count += 1
         except TelegramBadRequest:
             pass
         except Exception as e:
-            logging.error(f"Error deleting channel message {msg_id}: {e}")
+            logging.error(f"Error deleting message {msg_id} in channel {chat_id}: {e}")
 
+    # Deleting the files cascades to file_locations (ON DELETE CASCADE).
     db_execute('DELETE FROM files   WHERE folder_id = %s', (folder_id,))
     db_execute('DELETE FROM folders WHERE id = %s',        (folder_id,))
 
     await bot.edit_message_text(
         f"✅ <b>Folder Deleted</b>\n\n"
         f"📁 {esc(folder_name)}\n"
-        f"🗑 {deleted_count}/{total_msgs} channel messages removed.",
+        f"🗑 {deleted_count}/{total_copies} channel copies removed.",
         parse_mode=ParseMode.HTML,
         chat_id=original_message.chat.id,
         message_id=original_message.message_id

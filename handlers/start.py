@@ -11,7 +11,7 @@ from utils.keyboard import IKB as InlineKeyboardButton
 from middlewares.authorization import is_private_chat, is_user_member, get_channel_title, invalidate_member_cache
 from utils.database import add_user_to_db, db_fetchone, db_execute, db_fetchall
 from utils.helpers import notify_admins, esc
-from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, ADMIN_CONTACT, PAYMENT_MODE
+from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, ADMIN_CONTACT, PAYMENT_MODE, BOT_NAME
 from datetime import datetime, timedelta
 
 router = Router()
@@ -71,7 +71,7 @@ async def send_ui(chat_id: int, message_id: int = None,
     greeting = f"<b>{chat_name}</b>"
     text = (
         f"👋 Welcome, {greeting}!\n\n"
-        "🏥 <b>Medical Content Bot</b> ✨\n\n"
+        f"🏥 <b>{BOT_NAME}</b> ✨\n\n"
     )
 
     if is_premium_user and premium_expiration:
@@ -150,14 +150,16 @@ async def send_ui(chat_id: int, message_id: int = None,
         for btn in folder_buttons:
             keyboard.row(btn)
 
-        # Pagination controls
+        # Pagination controls — keep ≤2 buttons per row to avoid crowding.
+        # Prev/Next share a row (at most 2); Refresh gets its own row.
         nav_buttons = []
         if page > 0:
             nav_buttons.append(InlineKeyboardButton(f"◀️ Page {page}", callback_data=f"pg:{page - 1}"))
-        nav_buttons.append(InlineKeyboardButton("🔄 Refresh", callback_data=f"pg:{page}"))
         if page < total_pages - 1:
             nav_buttons.append(InlineKeyboardButton(f"Page {page + 2} ▶️", callback_data=f"pg:{page + 1}"))
-        keyboard.row(*nav_buttons)
+        if nav_buttons:
+            keyboard.row(*nav_buttons)
+        keyboard.row(InlineKeyboardButton("🔄 Refresh", callback_data=f"pg:{page}"))
 
         # Info / contact buttons
         if not is_premium_user:
@@ -657,7 +659,7 @@ async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
                 chat_id=cq.message.chat.id, message_id=cq.message.message_id,
                 text=(
                     f"Hello {esc(first_name or 'there')}! 👋\n\n"
-                    "<b>I'm The Medical Content Bot</b> ✨\n\n"
+                    f"<b>I'm {BOT_NAME}</b> ✨\n\n"
                     "Access is limited to verified medical students to protect the content. 🙃\n\n"
                     "Your request has been sent to an admin.\n"
                     "Tap <b>How to Verify</b> below to see what to send them.\n\n"
@@ -818,7 +820,7 @@ async def handle_start(message: types.Message):
             )
             await message.answer(
                 f"👋 <b>Hello, {name}!</b>\n\n"
-                "🏥 <b>Welcome to the Medical Content Bot</b>\n\n"
+                f"🏥 <b>Welcome to {BOT_NAME}</b>\n\n"
                 "This bot gives verified medical students access to an organised "
                 "archive of study materials — directly in Telegram.\n\n"
                 "🔐 <b>Access is verified-students only</b> to protect content creators.\n\n"

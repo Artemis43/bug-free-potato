@@ -14,7 +14,7 @@ from utils.database import db_fetchone
 from utils.keyboard import InlineBuilder
 from config import (
     REQUIRED_CHANNELS, ADMIN_CONTACT,
-    PAYMENT_MODE,
+    PAYMENT_MODE, BOT_NAME,
 )
 
 router = Router()
@@ -41,7 +41,7 @@ def get_help_content() -> str:
     upgrade_line = _premium_upgrade_line()
 
     return (
-        "🏥 <b>How to Use the Medical Content Bot</b>\n\n"
+        f"🏥 <b>How to Use {BOT_NAME}</b>\n\n"
 
         "📂 <b>Downloading Files</b>\n"
         "📌 Tap any folder button in /start — files arrive automatically.\n"
@@ -65,7 +65,7 @@ def get_about_content() -> str:
     upgrade_line = _premium_upgrade_line()
 
     return (
-        "🏥 <b>Medical Content Bot</b>\n\n"
+        f"🏥 <b>{BOT_NAME}</b>\n\n"
         "Your personal study companion on Telegram — organising and "
         "delivering medical content directly to verified students.\n\n"
 

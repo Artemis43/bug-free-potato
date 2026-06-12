@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Medical Content Bot — Razorpay Webhook",
+    title=f"{config.BOT_NAME} — Razorpay Webhook",
     version="1.0.0",
     description="Receives and processes Razorpay payment events for the Telegram bot.",
     docs_url="/docs" if config.ENV != "production" else None,
@@ -233,7 +233,7 @@ async def payment_success():
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Payment Successful — Medical Content Bot</title>
+  <title>Payment Successful — BOT_NAME_PLACEHOLDER</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -294,4 +294,4 @@ async def payment_success():
   </div>
 </body>
 </html>
-"""
+""".replace("BOT_NAME_PLACEHOLDER", config.BOT_NAME)

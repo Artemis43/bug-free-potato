@@ -34,6 +34,9 @@ ADMIN_GROUP_ID: str = os.environ.get("ADMIN_GROUP_ID", "")
 
 ADMIN_CONTACT: str = os.environ.get("ADMIN_CONTACT", "@admin")
 
+# Human-readable bot name shown in the payment success page and API title.
+BOT_NAME: str = os.environ.get("BOT_NAME", "Medical Content Bot")
+
 # ── Database ──────────────────────────────────────────────────────────────────
 DB_STRING: str = os.environ.get("DB_STRING", "")
 

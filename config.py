@@ -9,6 +9,11 @@ except ImportError:
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
 API_TOKEN = os.environ.get('API_TOKEN')
+# Unique key for THIS bot process. Multi-bot deployments share one Supabase DB
+# and each runs as its own process with a distinct BOT_ID; downloads are served
+# from the storage channels this bot is paired with. Defaults to 'main' so a
+# single-bot setup needs no extra config.
+BOT_ID = os.environ.get('BOT_ID', 'main')
 ADMIN_IDS = [a.strip() for a in os.environ.get('ADMINS', '').split(',') if a.strip()]
 CHANNEL_ID  = os.environ.get('CHANNEL')
 # Telegram group/supergroup ID where new-user approval requests are posted.
@@ -30,6 +35,10 @@ POSTGRES_CONNECTION_STRING = os.environ.get('DB_STRING')
 # Admin contact handle shown in rejection / support messages
 ADMIN_CONTACT = os.environ.get('ADMIN_CONTACT', '@Art3mis_adminbot')
 DEFAULT_CAPTION = os.environ.get('DEFAULT_CAPTION', '@Medical_Contentbot\nEver-growing archive of medical content')
+
+# Human-readable bot name shown to users in messages (e.g. welcome, help, about).
+# Each bot instance in a multi-bot setup should set its own name.
+BOT_NAME = os.environ.get('BOT_NAME', 'Medical Content Bot')
 
 # ── Payment mode ─────────────────────────────────────────────────────────────
 # Controls which payment system is active.

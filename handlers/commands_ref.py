@@ -3,7 +3,7 @@ from aiogram import Router
 from aiogram.enums import ParseMode
 from aiogram import Router
 from middlewares.authorization import is_private_chat
-from config import ADMIN_IDS
+from config import ADMIN_IDS, BOT_NAME
 
 router = Router()
 
@@ -13,7 +13,7 @@ router = Router()
 # ─────────────────────────────────────────────────────────────────────────────
 
 _USER_COMMANDS = """
-<b>📖 Command Reference — Medical Content Bot</b>
+<b>📖 Command Reference — {bot_name}</b>
 
 <b>🚀 Getting Started</b>
 
@@ -161,7 +161,7 @@ _ADMIN_COMMANDS = """
   <code>/renamefolder Old Notes,2025 Notes</code>
 
 ▸ <code>/deletefolder &lt;name&gt;</code>
-  Delete a folder and all its files from the archive channel.
+  Delete a folder and all its files from every storage channel.
   Shows a confirmation dialog (✅ Yes / ❌ Cancel) before proceeding.
   Example:  <code>/deletefolder Old Anatomy Notes</code>
 
@@ -242,6 +242,32 @@ _ADMIN_COMMANDS_2 = """
   Example:  <code>/payconfig orders 20</code>
 
 
+<b>🗄 Storage Channels (Backup)</b>
+
+  Every uploaded file is mirrored to ALL active storage channels for
+  redundancy — if one channel is taken down, the others are unaffected.
+  In multi-bot setups each bot delivers files only from the channels it is
+  an admin of (marked 📥 in /channels).
+
+▸ <code>/channels</code>
+  List all storage channels with their status (🟢 active / 🔴 disabled)
+  and how many file copies each holds. Each entry has tap-to-run
+  toggle/remove commands.
+
+▸ <code>/addchannel &lt;chat_id&gt; [title]</code>
+  Add a storage channel. Add the bot to the channel as an <b>admin</b>
+  first, then pass the channel id (e.g. <code>-1001234567890</code>) or @username.
+  New uploads are mirrored there immediately.
+
+▸ <code>/togglechannel_&lt;id&gt;</code>
+  Enable/disable a channel without deleting it. Disabled channels are
+  skipped on upload; their existing files are left untouched.
+
+▸ <code>/removechannel_&lt;id&gt;</code>
+  Remove a channel from the set (drops its replica records). Other
+  channels and the files themselves are unaffected.
+
+
 <b>🔧 Maintenance</b>
 
 ▸ <code>/caption &lt;type&gt; &lt;text&gt;</code>
@@ -270,7 +296,7 @@ async def commands_reference(message: types.Message):
     is_admin = str(message.from_user.id) in ADMIN_IDS
 
     # Send user section first
-    await message.reply(_USER_COMMANDS.strip(), parse_mode=ParseMode.HTML)
+    await message.reply(_USER_COMMANDS.strip().format(bot_name=BOT_NAME), parse_mode=ParseMode.HTML)
 
     # Send admin section only to admins (split into two messages to stay under Telegram's 4096-char limit)
     if is_admin:

@@ -68,7 +68,7 @@ from handlers import (
     start, broadcast, caption, document,
     getlist, folder, download, setpremium,
     stop, about_help, sync, status, admin_tools, commands_ref, payment,
-    payment_stars, stats,
+    payment_stars, stats, channels,
 )
 
 # Register all command/filter bindings onto their respective routers
@@ -84,7 +84,7 @@ for module in (
     start, broadcast, caption, document,
     getlist, folder, download, setpremium,
     stop, sync, status, admin_tools, commands_ref, payment,
-    payment_stars, stats,
+    payment_stars, stats, channels,
     about_help,   # <-- must stay last (unknown-command fallback)
 ):
     if hasattr(module, 'router'):

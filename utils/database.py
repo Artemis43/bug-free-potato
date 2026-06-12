@@ -1,7 +1,7 @@
 import logging
 import psycopg2
 from psycopg2 import pool as _pg_pool
-from config import POSTGRES_CONNECTION_STRING, DEFAULT_CAPTION
+from config import POSTGRES_CONNECTION_STRING, DEFAULT_CAPTION, CHANNEL_ID
 
 _pool: _pg_pool.ThreadedConnectionPool | None = None
 
@@ -77,6 +77,57 @@ def initialize_database():
                 message_id INTEGER,
                 caption    TEXT,
                 file_type  TEXT    DEFAULT 'document'
+            )
+        ''')
+
+        # ── Storage channels (multi-channel backup) ───────────────────────────
+        # Admin-configurable set of channels every upload is mirrored to. Stored
+        # in the DB (not env) so channels can be added/removed at runtime.
+        # chat_id is TEXT to accept either a numeric -100… id or an @username,
+        # exactly as the value is passed to aiogram's send_*/copy_message.
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS storage_channels (
+                id        SERIAL PRIMARY KEY,
+                chat_id   TEXT        NOT NULL UNIQUE,
+                title     TEXT,
+                active    BOOLEAN     DEFAULT TRUE,
+                added_at  TIMESTAMPTZ DEFAULT NOW()
+            )
+        ''')
+
+        # ── File replicas: one row per (file, channel) physical copy ──────────
+        # Decoupling the logical `files` record from its physical copies is what
+        # isolates a copyright strike: dropping/disabling one channel removes
+        # only its file_locations rows, never the file or the other channels.
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS file_locations (
+                id         SERIAL  PRIMARY KEY,
+                file_pk    INTEGER NOT NULL REFERENCES files(id)            ON DELETE CASCADE,
+                channel_id INTEGER NOT NULL REFERENCES storage_channels(id) ON DELETE CASCADE,
+                message_id INTEGER NOT NULL,
+                UNIQUE (file_pk, channel_id)
+            )
+        ''')
+
+        # ── Bots & bot↔channel pairing (multi-bot retrieval) ──────────────────
+        # Each bot process (identified by BOT_ID) registers in `bots`.
+        # `bot_channels` records which storage channels a bot can retrieve from
+        # (it must be an admin there). Retrieval copies a file from one of the
+        # serving bot's paired channels — Telegram file_ids are bot-specific, so
+        # cross-bot sharing must go through copy_message from a shared channel.
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS bots (
+                id      SERIAL  PRIMARY KEY,
+                bot_key TEXT    NOT NULL UNIQUE,
+                name    TEXT,
+                active  BOOLEAN DEFAULT TRUE
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS bot_channels (
+                bot_id     INTEGER NOT NULL REFERENCES bots(id)             ON DELETE CASCADE,
+                channel_id INTEGER NOT NULL REFERENCES storage_channels(id) ON DELETE CASCADE,
+                PRIMARY KEY (bot_id, channel_id)
             )
         ''')
 
@@ -227,6 +278,35 @@ def initialize_database():
               AND u.current_upload_folder_id IS NULL
         """)
 
+        # ── Migration: seed multi-channel storage from the legacy CHANNEL ─────
+        # Treat the existing single CHANNEL as storage channel #1 and backfill
+        # file_locations from files.message_id, so all current content keeps
+        # working once retrieval/deletion move to the file_locations model.
+        # Idempotent (ON CONFLICT DO NOTHING) — safe to run on every startup.
+        if CHANNEL_ID:
+            cur.execute('SELECT COUNT(*) FROM storage_channels')
+            if cur.fetchone()[0] == 0:
+                cur.execute(
+                    'INSERT INTO storage_channels (chat_id, title) VALUES (%s, %s) '
+                    'ON CONFLICT (chat_id) DO NOTHING',
+                    (str(CHANNEL_ID), 'Primary (migrated)')
+                )
+                logging.info("Seeded primary storage channel from CHANNEL env.")
+
+            cur.execute('SELECT id FROM storage_channels WHERE chat_id = %s', (str(CHANNEL_ID),))
+            primary = cur.fetchone()
+            if primary:
+                cur.execute(
+                    '''
+                    INSERT INTO file_locations (file_pk, channel_id, message_id)
+                    SELECT f.id, %s, f.message_id
+                    FROM files f
+                    WHERE f.message_id IS NOT NULL
+                    ON CONFLICT (file_pk, channel_id) DO NOTHING
+                    ''',
+                    (primary[0],)
+                )
+
         # ── Indices for common query patterns ─────────────────────────────────
         cur.execute(
             'CREATE INDEX IF NOT EXISTS idx_files_folder_id   ON files(folder_id)'
@@ -236,6 +316,12 @@ def initialize_database():
         )
         cur.execute(
             'CREATE INDEX IF NOT EXISTS idx_payment_orders_uid ON payment_orders(user_id)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_file_locations_file ON file_locations(file_pk)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_bot_channels_channel ON bot_channels(channel_id)'
         )
 
         conn.commit()
@@ -282,6 +368,24 @@ def db_execute(query: str, params=None):
         cur = conn.cursor()
         cur.execute(query, params)
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _release(conn)
+
+
+def db_execute_returning(query: str, params=None):
+    """Run a writing statement that returns a row (INSERT/UPDATE … RETURNING)
+    and COMMIT it. Use this instead of db_fetchone for writes — db_fetchone
+    never commits, so an INSERT through it would be rolled back."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(query, params)
+        row = cur.fetchone()
+        conn.commit()
+        return row
     except Exception:
         conn.rollback()
         raise

@@ -13,6 +13,8 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery, TelegramObject
 from aiogram.enums import ParseMode
 
+from config import ADMIN_IDS
+
 log = logging.getLogger(__name__)
 
 # Seconds required between any two messages from the same user.
@@ -42,6 +44,14 @@ class RateLimitMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         user_id = user.id
+
+        # ── Admin exemption ───────────────────────────────────────────────
+        # Admins are trusted and are the only users who upload files. Never
+        # throttle them — otherwise a bulk/album upload (items arrive in
+        # <200ms bursts) would have most of its files silently dropped.
+        if str(user_id) in ADMIN_IDS:
+            return await handler(event, data)
+
         now     = time.monotonic()
 
         # ── Mute check ────────────────────────────────────────────────────
@@ -87,6 +97,11 @@ class CallbackRateLimitMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         user_id = event.from_user.id
+
+        # Admins are exempt (mirrors RateLimitMiddleware above).
+        if str(user_id) in ADMIN_IDS:
+            return await handler(event, data)
+
         now     = time.monotonic()
 
         if now < _muted_until.get(user_id, 0):

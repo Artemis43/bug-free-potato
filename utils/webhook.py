@@ -2,7 +2,7 @@ from utils.bot_ref import get_bot
 import asyncio
 import logging
 from utils.database import initialize_database, db_fetchall
-from config import WEBHOOK_URL, ADMIN_IDS
+from config import WEBHOOK_URL, ADMIN_IDS, BOT_ID
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +49,8 @@ async def _register_commands(bot):
         BotCommand(command="payconfig",       description="💳 Configure payment plans & prices"),
         BotCommand(command="caption",         description="🏷️  Set the file caption"),
         BotCommand(command="stats",           description="📊 Analytics dashboard"),
+        BotCommand(command="channels",        description="🗄 Manage storage channels"),
+        BotCommand(command="addchannel",      description="➕ Add a storage channel"),
         BotCommand(command="forcedsyncdb",    description="🔄 Force a database sync"),
         BotCommand(command="stop",            description="🛑 Gracefully shut down the bot"),
     ]
@@ -95,13 +97,64 @@ async def on_startup(bot):
         log.critical(f"Database initialisation failed: {e}")
         raise  # Cannot run without DB
 
-    # 2. BotFather command menus
+    # 2. Register this bot & detect which storage channels it can serve from
+    await _sync_bot_channels(bot)
+
+    # 3. BotFather command menus
     await _register_commands(bot)
 
-    # 3. Reschedule premium expiry tasks
+    # 4. Reschedule premium expiry tasks
     await _reschedule_premium_expiry()
 
     log.info("✅ Bot is ready and listening.")
+
+
+# ── Multi-bot: register & detect servable channels ─────────────────────────
+
+async def _sync_bot_channels(bot):
+    """Register this bot and refresh which storage channels it can serve from.
+
+    Probes admin membership of each ACTIVE storage channel and records the
+    pairing in ``bot_channels`` so the download path can pick a channel to
+    ``copy_message`` from without a Telegram API call per file. Safe to run on
+    every startup — it adds newly-accessible channels and drops ones the bot
+    has lost access to.
+    """
+    from utils.bots import (
+        register_bot, get_bot_channel_ids, pair_bot_channel, unpair_bot_channel,
+    )
+    from utils.storage import list_storage_channels
+
+    try:
+        me = await bot.me()
+        bot_pk = register_bot(name=(me.username or me.full_name))
+    except Exception as e:
+        log.error(f"Could not register bot '{BOT_ID}' for retrieval: {e}")
+        return
+    if bot_pk is None:
+        log.error("Bot registration returned no id; downloads may be unavailable.")
+        return
+
+    paired      = set(get_bot_channel_ids(bot_pk))
+    serve_count = 0
+    for ch_id, chat_id, title, _active in list_storage_channels(active_only=True):
+        try:
+            member   = await bot.get_chat_member(chat_id, bot.id)
+            is_admin = member.status in ("administrator", "creator")
+        except Exception as e:
+            is_admin = False
+            log.warning(f"Bot '{BOT_ID}' can't access storage channel {chat_id} ({title}): {e}")
+
+        if is_admin:
+            serve_count += 1
+            if ch_id not in paired:
+                pair_bot_channel(bot_pk, ch_id)
+                log.info(f"Paired bot '{BOT_ID}' with channel {chat_id}.")
+        elif ch_id in paired:
+            unpair_bot_channel(bot_pk, ch_id)
+            log.info(f"Unpaired bot '{BOT_ID}' from channel {chat_id} (no longer admin).")
+
+    log.info(f"Bot '{BOT_ID}' can serve downloads from {serve_count} active channel(s).")
 
 
 # ── Premium expiry rescheduler ─────────────────────────────────────────────

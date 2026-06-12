@@ -35,6 +35,7 @@ import handlers.payment_stars as _payment_stars
 import handlers.stats        as _stats
 import handlers.stop         as _stop
 import handlers.sync         as _sync
+import handlers.channels     as _channels
 from config import ADMIN_IDS
 
 
@@ -139,3 +140,15 @@ def register_all_handlers() -> None:
 
     # ── Sync ─────────────────────────────────────────────────────────────
     _sync.router.message.register(_sync.sync_database_command, Command("forcedsyncdb"))
+
+    # ── Storage channels (admin) ──────────────────────────────────────────
+    _channels.router.message.register(_channels.list_channels, Command("channels"))
+    _channels.router.message.register(_channels.add_channel,   Command("addchannel"))
+    _channels.router.message.register(
+        _channels.toggle_channel,
+        F.text.startswith("/togglechannel_") & F.from_user.id.func(lambda uid: str(uid) in ADMIN_IDS)
+    )
+    _channels.router.message.register(
+        _channels.remove_channel,
+        F.text.startswith("/removechannel_") & F.from_user.id.func(lambda uid: str(uid) in ADMIN_IDS)
+    )
