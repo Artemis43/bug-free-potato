@@ -123,11 +123,13 @@ class TestUploadFanout:
         with patch("handlers.document.get_bot", return_value=bot), \
              patch("handlers.document._build_caption", return_value="cap"), \
              patch("handlers.document.db_execute_returning", return_value=(42,)), \
-             patch("handlers.document.record_file_locations") as rec:
+             patch("handlers.document.record_file_locations") as rec, \
+             patch("handlers.document.create_pending_replications") as pend:
             result = await doc._store_file(msg, folder_id=9, channels=channels)
 
         assert result == ("notes.pdf", 2, 3)                 # 2 of 3 survived
         assert len(rec.call_args[0][1]) == 2
+        pend.assert_called_once_with(42, {2})                # channel 2 was missed
 
     @pytest.mark.asyncio
     async def test_all_channels_fail_returns_none_and_writes_nothing(self):
