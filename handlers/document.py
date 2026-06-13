@@ -7,7 +7,7 @@ from middlewares.authorization import is_private_chat, is_user_member
 from utils.database import db_fetchone, db_execute_returning
 from utils.helpers import get_current_upload_folder, esc
 from utils.media_group import collect_media_group
-from utils.storage import list_storage_channels, record_file_locations
+from utils.storage import list_storage_channels, record_file_locations, create_pending_replications
 
 router = Router()
 
@@ -90,6 +90,12 @@ async def _store_file(message: types.Message, folder_id, channels) -> tuple | No
         (file_id, file_name, folder_id, first_msg_id, caption, file_type)
     )
     record_file_locations(row[0], successes)
+    # Queue replications for channels this bot couldn't reach (not an admin there).
+    # Another bot that IS admin in those channels will copy_message on its next tick.
+    stored_ids = {ch_id for ch_id, _ in successes}
+    missed_ids  = {ch[0] for ch in channels} - stored_ids
+    if missed_ids:
+        create_pending_replications(row[0], missed_ids)
     return (file_name, len(successes), total)
 
 

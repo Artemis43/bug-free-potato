@@ -307,6 +307,22 @@ def initialize_database():
                     (primary[0],)
                 )
 
+        # ── Pending cross-bot replications ────────────────────────────────────
+        # When the uploading bot can't reach some channels (not an admin there),
+        # it queues a replication task here. The bot that IS admin in the target
+        # channel picks it up on startup or via the periodic 5-minute loop,
+        # copy_message-ing the file from a shared channel it CAN access.
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS pending_replications (
+                id                SERIAL  PRIMARY KEY,
+                file_pk           INTEGER NOT NULL REFERENCES files(id)             ON DELETE CASCADE,
+                target_channel_id INTEGER NOT NULL REFERENCES storage_channels(id) ON DELETE CASCADE,
+                status            TEXT        DEFAULT 'pending',
+                created_at        TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (file_pk, target_channel_id)
+            )
+        ''')
+
         # ── Indices for common query patterns ─────────────────────────────────
         cur.execute(
             'CREATE INDEX IF NOT EXISTS idx_files_folder_id   ON files(folder_id)'
@@ -322,6 +338,10 @@ def initialize_database():
         )
         cur.execute(
             'CREATE INDEX IF NOT EXISTS idx_bot_channels_channel ON bot_channels(channel_id)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_pending_replications_status '
+            'ON pending_replications(status) WHERE status = \'pending\''
         )
 
         conn.commit()

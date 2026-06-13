@@ -88,6 +88,63 @@ def record_file_locations(file_pk: int, locations) -> None:
         )
 
 
+def create_pending_replications(file_pk: int, missed_channel_ids) -> None:
+    """Queue replication tasks for channels the uploading bot couldn't reach.
+
+    Called by _store_file when some active storage channels were skipped
+    (the uploading bot is not admin there). Another bot that IS admin in
+    those channels will pull the file via copy_message on its next tick.
+    Idempotent — ON CONFLICT DO NOTHING means re-queuing an already-pending
+    entry is harmless.
+    """
+    for channel_id in missed_channel_ids:
+        db_execute(
+            '''
+            INSERT INTO pending_replications (file_pk, target_channel_id)
+            VALUES (%s, %s)
+            ON CONFLICT DO NOTHING
+            ''',
+            (file_pk, channel_id)
+        )
+
+
+def get_pending_replications_for_bot(bot_pk: int) -> list[tuple]:
+    """Return ``[(file_pk, target_channel_id, target_chat_id), …]`` for all
+    pending replications whose target channel is paired with this bot.
+
+    The bot can then copy_message from any source channel it can access
+    (get_servable_locations) into the target.
+    """
+    return db_fetchall(
+        '''
+        SELECT pr.file_pk, pr.target_channel_id, sc.chat_id
+        FROM   pending_replications pr
+        JOIN   storage_channels sc ON sc.id = pr.target_channel_id
+        JOIN   bot_channels bc     ON bc.channel_id = sc.id AND bc.bot_id = %s
+        WHERE  pr.status = 'pending' AND sc.active = TRUE
+        ORDER  BY pr.created_at
+        LIMIT  500
+        ''',
+        (bot_pk,)
+    )
+
+
+def mark_replication_done(file_pk: int, target_channel_id: int) -> None:
+    db_execute(
+        "UPDATE pending_replications SET status = 'done' "
+        "WHERE file_pk = %s AND target_channel_id = %s",
+        (file_pk, target_channel_id)
+    )
+
+
+def mark_replication_failed(file_pk: int, target_channel_id: int) -> None:
+    db_execute(
+        "UPDATE pending_replications SET status = 'failed' "
+        "WHERE file_pk = %s AND target_channel_id = %s",
+        (file_pk, target_channel_id)
+    )
+
+
 def get_file_locations(file_pk: int, active_only: bool = True) -> list[tuple]:
     """Return ``[(channel_id, chat_id, message_id), …]`` for a file, joined to
     storage_channels. ``active_only`` keeps only enabled channels (for

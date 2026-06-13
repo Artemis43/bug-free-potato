@@ -100,6 +100,9 @@ async def on_startup(bot):
     # 2. Register this bot & detect which storage channels it can serve from
     await _sync_bot_channels(bot)
 
+    # 2b. Copy any files queued while this bot was offline; start periodic retry loop
+    asyncio.create_task(_replication_startup(bot))
+
     # 3. BotFather command menus
     await _register_commands(bot)
 
@@ -155,6 +158,33 @@ async def _sync_bot_channels(bot):
             log.info(f"Unpaired bot '{BOT_ID}' from channel {chat_id} (no longer admin).")
 
     log.info(f"Bot '{BOT_ID}' can serve downloads from {serve_count} active channel(s).")
+
+
+# ── Cross-bot replication ──────────────────────────────────────────────────
+
+async def _replication_startup(bot):
+    """Run one replication pass on startup, then kick off the periodic loop."""
+    from utils.bots import process_pending_replications
+    try:
+        done = await process_pending_replications(bot)
+        if done:
+            log.info("Startup replication: copied %d file(s) into this bot's channels.", done)
+    except Exception as e:
+        log.warning("Startup replication pass failed: %s", e)
+    asyncio.create_task(_replication_loop(bot))
+
+
+async def _replication_loop(bot):
+    """Every 5 minutes, retry any pending cross-bot replications."""
+    from utils.bots import process_pending_replications
+    while True:
+        await asyncio.sleep(300)
+        try:
+            done = await process_pending_replications(bot)
+            if done:
+                log.info("Periodic replication: copied %d file(s).", done)
+        except Exception as e:
+            log.warning("Periodic replication pass failed: %s", e)
 
 
 # ── Premium expiry rescheduler ─────────────────────────────────────────────
