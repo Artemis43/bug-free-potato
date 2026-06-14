@@ -55,7 +55,7 @@ RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET', '')
 RAZORPAY_WEBHOOK_SECRET = os.environ.get('RAZORPAY_WEBHOOK_SECRET', '')
 
 # ── Optional / Advanced ───────────────────────────────────────────────────────
-KEEP_ALIVE_PORT = int(os.environ.get('KEEP_ALIVE_PORT', '4343'))
+KEEP_ALIVE_PORT = int(os.environ.get('KEEP_ALIVE_PORT') or '4343')
 LOG_LEVEL       = os.environ.get('LOG_LEVEL', 'INFO').upper()
 
 # Hours before re-notifying admin about the same pending user's /start
