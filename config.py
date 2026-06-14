@@ -110,6 +110,13 @@ def _validate_config() -> None:
             "RAZORPAY_WEBHOOK_SECRET is not set — incoming Razorpay webhooks "
             "will be rejected. Set it to enable automatic premium activation."
         )
+    if PAYMENT_MODE == 'razorpay' and not WEBHOOK_HOST:
+        import logging
+        logging.getLogger(__name__).warning(
+            "HOST_URL is not set — Razorpay payment links will have no "
+            "post-payment redirect. Set HOST_URL to your public server URL "
+            "to enable the /payment/success redirect after checkout."
+        )
 
 
 _validate_config()
