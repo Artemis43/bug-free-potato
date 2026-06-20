@@ -38,7 +38,6 @@ import handlers.sync         as _sync
 import handlers.channels     as _channels
 import handlers.category     as _category
 import handlers.search       as _search
-import handlers.reply_router as _reply_router
 from config import ADMIN_IDS
 
 
@@ -180,9 +179,6 @@ def register_all_handlers() -> None:
     # ── Catalog (admin + user) ────────────────────────────────────────────
     _category.router.message.register(_catalog_cmd,      Command("catalog"))
     _category.router.message.register(_catalog_url_cmd,  Command("catalogurl"))
-
-    # ── Reply keyboard text routing (must be AFTER command handlers, BEFORE catch-all) ──
-    _reply_router.register(_reply_router.router)
 
 
 # ── Catalog command handlers ───────────────────────────────────────────────────

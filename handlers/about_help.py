@@ -12,7 +12,6 @@ from utils.keyboard import IKB as InlineKeyboardButton
 from middlewares.authorization import is_private_chat, is_user_member, invalidate_member_cache
 from utils.database import db_fetchone
 from utils.keyboard import InlineBuilder
-from utils.reply_keyboard import back_keyboard, main_menu_keyboard
 from config import (
     REQUIRED_CHANNELS, ADMIN_CONTACT,
     PAYMENT_MODE, BOT_NAME,
@@ -173,12 +172,6 @@ async def help_command(message: types.Message):
         reply_markup=_help_keyboard(),
         disable_web_page_preview=True,
     )
-    # Also restore the reply keyboard so navigation persists
-    row = db_fetchone('SELECT premium FROM users WHERE user_id = %s', (message.from_user.id,))
-    await message.answer(
-        "👆 Use the menu below to navigate.",
-        reply_markup=main_menu_keyboard(bool(row and row[0])),
-    )
 
 
 async def about_command(message: types.Message):
@@ -194,11 +187,6 @@ async def about_command(message: types.Message):
         reply_markup=_about_keyboard(),
         disable_web_page_preview=True,
     )
-    row = db_fetchone('SELECT premium FROM users WHERE user_id = %s', (message.from_user.id,))
-    await message.answer(
-        "👆 Use the menu below to navigate.",
-        reply_markup=main_menu_keyboard(bool(row and row[0])),
-    )
 
 
 async def handle_invalid_command(message: types.Message):
@@ -212,21 +200,14 @@ async def handle_invalid_command(message: types.Message):
     # Extract just the command name (strip args and the slash)
     cmd = message.text.split()[0].lstrip('/').split('@')[0]
 
-    # Show available reply keyboard buttons so the user can self-serve
-    row = db_fetchone('SELECT status, premium FROM users WHERE user_id = %s', (message.from_user.id,))
-    status = row[0] if row else 'unknown'
-    is_prem = bool(row and row[1]) if row else False
-
     await message.reply(
         f"🤔 <b>Unknown command:</b> <code>/{cmd}</code>\n\n"
         "Here's what I can do:\n"
-        "  • Tap <b>📚 Browse</b> to see all content categories\n"
-        "  • Tap <b>🔍 Search</b> to find a specific folder\n"
-        "  • /help — full usage guide\n"
-        "  • /status — your account info\n"
-        "  • /commands — all available commands\n\n"
-        "<i>Can't find what you need? Tap 💬 Support below.</i>",
+        "• /start — open the folder menu\n"
+        "• /help — how to download files\n"
+        "• /status — your account info\n"
+        "• /commands — full command list\n\n"
+        "<i>Can't find what you need? Contact the admin.</i>",
         parse_mode=ParseMode.HTML,
-        reply_markup=main_menu_keyboard(is_prem) if status == 'approved' else None,
     )
     log.debug(f"Unknown command /{cmd} from user {message.from_user.id}")
