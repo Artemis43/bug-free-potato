@@ -1,7 +1,7 @@
 import logging
 import psycopg2
 from psycopg2 import pool as _pg_pool
-from config import POSTGRES_CONNECTION_STRING, DEFAULT_CAPTION, CHANNEL_ID
+from config import POSTGRES_CONNECTION_STRING, DEFAULT_CAPTION, CHANNEL_ID, BOT_ID
 
 _pool: _pg_pool.ThreadedConnectionPool | None = None
 
@@ -619,15 +619,17 @@ def search_folders(query: str, limit: int = 15):
 # ── Catalog config helpers ─────────────────────────────────────────────────────
 
 def get_catalog_config(key: str) -> str:
-    """Read a catalog config value from payment_config table."""
-    row = db_fetchone("SELECT value_text FROM payment_config WHERE key = %s", (key,))
+    """Read a catalog config value from payment_config table, scoped by BOT_ID."""
+    scoped_key = f"{key}_{BOT_ID}"
+    row = db_fetchone("SELECT value_text FROM payment_config WHERE key = %s", (scoped_key,))
     return row[0] if row and row[0] else ''
 
 
 def set_catalog_config(key: str, value: str) -> None:
-    """Write a catalog config value to payment_config table."""
+    """Write a catalog config value to payment_config table, scoped by BOT_ID."""
+    scoped_key = f"{key}_{BOT_ID}"
     db_execute(
         "INSERT INTO payment_config (key, value_text) VALUES (%s, %s) "
         "ON CONFLICT (key) DO UPDATE SET value_text = EXCLUDED.value_text",
-        (key, value)
+        (scoped_key, value)
     )
