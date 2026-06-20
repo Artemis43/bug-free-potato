@@ -162,6 +162,12 @@ async def execute_broadcast(callback_query: types.CallbackQuery, broadcast_id: i
             success += 1
         except TelegramForbiddenError:
             blocked += 1
+        except TelegramBadRequest as e:
+            if "chat not found" in str(e).lower():
+                blocked += 1
+            else:
+                logging.error(f"Broadcast failed for user {user_id}: {e}")
+                failed += 1
         except TelegramRetryAfter as e:
             logging.warning(f"Broadcast flood limit — waiting {e.retry_after}s")
             await asyncio.sleep(e.retry_after)

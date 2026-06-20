@@ -28,11 +28,12 @@ from handlers import (
     channels,
     category,
     search,
+    reply_router,
 )
 
 __all__ = [
     "start", "broadcast", "caption", "document", "getlist", "folder",
     "download", "setpremium", "stop", "about_help", "sync", "status",
     "admin_tools", "commands_ref", "payment", "payment_stars", "stats",
-    "channels", "category", "search",
+    "channels", "category", "search", "reply_router",
 ]

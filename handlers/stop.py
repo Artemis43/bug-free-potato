@@ -29,7 +29,7 @@ async def stop(message: types.Message):
         await message.reply("You need to /start the bot first.")
         return
 
-    await message.reply("🛑 Bot is stopping…")
+    await message.reply("🛑 Bot is stopping…", reply_markup=__import__('utils.reply_keyboard', fromlist=['remove_keyboard']).remove_keyboard())
     logging.warning(f"Bot stopped by admin {user_id}.")
 
     bot = get_bot()

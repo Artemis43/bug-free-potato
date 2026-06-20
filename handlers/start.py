@@ -13,6 +13,10 @@ from utils.database import add_user_to_db, db_fetchone, db_execute, db_fetchall
 from utils.helpers import notify_admins, esc
 from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, ADMIN_CONTACT, PAYMENT_MODE, BOT_NAME
 from datetime import datetime, timedelta
+from utils.reply_keyboard import (
+    main_menu_keyboard, back_keyboard, remove_keyboard,
+    BTN_BROWSE, BTN_SEARCH,
+)
 
 router = Router()
 
@@ -178,7 +182,21 @@ async def send_ui(chat_id: int, message_id: int = None,
                 text=text, reply_markup=keyboard.build(), parse_mode=ParseMode.HTML
             )
         else:
-            await bot.send_message(chat_id, text, reply_markup=keyboard.build(), parse_mode=ParseMode.HTML)
+            # Fresh send — attach the reply keyboard so navigation buttons appear
+            user_data_r = db_fetchone('SELECT premium FROM users WHERE user_id = %s', (chat_id,))
+            is_prem = bool(user_data_r and user_data_r[0])
+            await bot.send_message(
+                chat_id, text,
+                reply_markup=keyboard.build(),
+                parse_mode=ParseMode.HTML,
+            )
+            # Send reply keyboard separately so it persists (can't combine with inline)
+            await bot.send_message(
+                chat_id,
+                "👆 Use the buttons above <i>or</i> the menu below to navigate.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=main_menu_keyboard(is_prem),
+            )
     except TelegramBadRequest:
         pass
 
@@ -287,6 +305,13 @@ async def send_category_ui(chat_id: int, category_id: int, message_id: int = Non
         else:
             await bot.send_message(
                 chat_id, text, reply_markup=keyboard.build(), parse_mode=ParseMode.HTML
+            )
+            # Attach the back keyboard so users can always escape to main menu
+            await bot.send_message(
+                chat_id,
+                "👆 Tap a folder above to download, or use the menu below.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=back_keyboard(),
             )
     except TelegramBadRequest:
         pass

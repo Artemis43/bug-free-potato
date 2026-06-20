@@ -21,6 +21,7 @@ from utils.database import db_execute, db_fetchall, db_fetchone
 from utils.helpers import esc, notify_admin_for_approval, notify_admin_for_approval_again
 from utils.keyboard import InlineBuilder
 import utils.progress as progress
+from utils.reply_keyboard import download_active_keyboard, main_menu_keyboard, remove_keyboard
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -168,6 +169,17 @@ async def _run_download(
         progress.finish_download(chat_id)
         return
 
+    # Show the cancel reply keyboard so it's always visible on mobile
+    try:
+        await bot.send_message(
+            chat_id,
+            "⏳ <i>Download in progress… tap Cancel below to stop.</i>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=download_active_keyboard(),
+        )
+    except Exception:
+        pass
+
     # ── Update download counter ───────────────────────────────────────────
     db_execute(
         'UPDATE folders SET download_count = download_count + 1 WHERE id = %s',
@@ -299,6 +311,9 @@ async def _run_download(
 
     # ── Send a NEW message to notify deletion (not an edit of the progress card)
     try:
+        # Restore the main menu keyboard now that everything is done
+        user_data_rd = db_fetchone('SELECT premium FROM users WHERE user_id = %s', (user_id,))
+        is_prem_rd = bool(user_data_rd and user_data_rd[0])
         await bot.send_message(
             chat_id,
             "\U0001f5d1 <b>Auto-deleted!</b>\n\n"
@@ -306,6 +321,7 @@ async def _run_download(
             "have been removed from this chat.\n"
             "\U0001f4da Saved them? All the best with your studies! \U0001f31f",
             parse_mode=ParseMode.HTML,
+            reply_markup=main_menu_keyboard(is_prem_rd),
         )
     except Exception:
         pass

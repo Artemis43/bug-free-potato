@@ -31,6 +31,7 @@ from utils.bot_ref import get_bot
 from utils.database import db_fetchone, search_folders
 from utils.helpers import esc
 from utils.keyboard import InlineBuilder, IKB as InlineKeyboardButton
+from utils.reply_keyboard import cancel_keyboard, back_keyboard, main_menu_keyboard
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -116,7 +117,7 @@ async def cmd_search(message: types.Message, state: FSMContext):
         "<i>Examples: anatomy, pharma, surgery notes</i>\n\n"
         "👇 <b>Type your search query below:</b>",
         parse_mode=ParseMode.HTML,
-        reply_markup=_search_prompt_keyboard(),
+        reply_markup=cancel_keyboard(),
     )
 
 
