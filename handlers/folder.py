@@ -14,9 +14,34 @@ from utils.helpers import set_current_upload_folder, esc
 
 router = Router()
 
+log = logging.getLogger(__name__)
+
 # In-memory pending deletions: { user_id: (folder_name, folder_id) }
 # NOTE: _pending_deletions is now managed in start.py so callbacks route there.
 # This module exposes execute_folder_deletion() called from start.process_callback.
+
+
+def _trigger_catalog_update() -> None:
+    """Fire-and-forget: schedule a background catalog regeneration."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(_do_catalog_update())
+    except Exception:
+        pass
+
+
+async def _do_catalog_update():
+    try:
+        from utils.bot_ref import get_bot
+        from utils.catalog import generate_catalog
+        bot = get_bot()
+        me = await bot.me()
+        await generate_catalog(me.username)
+    except Exception as e:
+        log.debug(f"[Folder] Catalog update skipped: {e}")
+
 
 
 async def create_folder(message: types.Message):
@@ -82,6 +107,13 @@ async def create_folder(message: types.Message):
         f"Upload folder is now set to <b>{esc(folder_name)}</b>. Send files to add them.",
         parse_mode=ParseMode.HTML
     )
+    # Update search vector for new folder
+    db_execute(
+        "UPDATE folders SET search_vector = to_tsvector('english', name) WHERE name = %s",
+        (folder_name,)
+    )
+    # Trigger catalog auto-update
+    _trigger_catalog_update()
 
 
 async def rename_folder(message: types.Message):
@@ -120,10 +152,16 @@ async def rename_folder(message: types.Message):
         return
 
     db_execute('UPDATE folders SET name = %s WHERE id = %s', (new_name, folder_row[0]))
+    # Also update the search vector for the new name
+    db_execute(
+        "UPDATE folders SET search_vector = to_tsvector('english', name) WHERE id = %s",
+        (folder_row[0],)
+    )
     await message.reply(
         f"✅ Renamed: <b>{esc(current_name)}</b> → <b>{esc(new_name)}</b>",
         parse_mode=ParseMode.HTML
     )
+    _trigger_catalog_update()
 
 
 async def delete_folder(message: types.Message):

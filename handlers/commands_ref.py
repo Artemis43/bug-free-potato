@@ -18,8 +18,9 @@ _USER_COMMANDS = """
 <b>🚀 Getting Started</b>
 
 ▸ <code>/start</code>
-  Opens the main folder menu with clickable download buttons.
-  <i>Run this any time to refresh the folder list.</i>
+  Opens the categories menu — tap a category to see its folders,
+  then tap a folder button to download all its files instantly.
+  <i>Run this any time to refresh the menu.</i>
 
 ▸ <code>/help</code>
   Shows how to use the bot — download methods, cooldowns, tips.
@@ -30,15 +31,37 @@ _USER_COMMANDS = """
 
 <b>⬇️ Downloading</b>
 
-▸ <code>/start</code>  → tap a folder button
-  The easiest way — no typing needed.
+▸ <code>/start</code>  → tap a category → tap a folder button
+  The easiest way — browse and download without typing.
 
 ▸ <code>/download &lt;folder name&gt;</code>
-  Downloads all files in a named folder.
+  Downloads all files in a named folder directly.
   Example:
   <code>/download Anatomy</code>
   <code>/download First Year Surgery Notes</code>
   ⚠️ Folder name must match exactly (case-sensitive).
+
+
+<b>🔍 Search</b>
+
+▸ <code>/search</code>
+  Opens interactive search mode — type any keyword or partial name.
+  Finds folders by exact name, prefix, substring, or fuzzy match.
+
+▸ <code>/search &lt;query&gt;</code>
+  Search immediately without entering interactive mode.
+  Example: <code>/search anatomy</code>
+
+▸ <b>Inline search</b>: type <code>@{bot_username} anatomy</code> in any chat
+  Shows matching folders as results — tap one to share the deep link.
+
+
+<b>📖 Content Catalog</b>
+
+▸ <code>/catalog</code>
+  Opens a Telegra.ph page listing all categories and folders,
+  each with a one-click link to open the bot and download.
+  Great for sharing or browsing on desktop.
 
 
 <b>📊 Your Account</b>
@@ -174,6 +197,52 @@ _ADMIN_COMMANDS = """
   Full inventory: all folders (with IDs and download counts),
   premium folders, paid folders, total users, pending users,
   and all premium users with expiry dates.
+
+
+<b>🗂 Category Management</b>
+
+▸ <code>/newcategory [emoji] &lt;name&gt;</code>
+  Create a new content category.
+  The emoji is optional (defaults to 📁 if omitted).
+  Examples:
+  <code>/newcategory 🧬 Anatomy</code>
+  <code>/newcategory Pharmacology</code>
+
+▸ <code>/categories</code>
+  List all categories with their folder counts, IDs, and sort order.
+
+▸ <code>/movefolder &lt;folder&gt;,&lt;category&gt;</code>
+  Assign a folder to a category.
+  Example:  <code>/movefolder Human Anatomy,Anatomy</code>
+
+▸ <code>/removefoldercategory &lt;folder&gt;</code>
+  Remove a folder from its category (moves to Uncategorized).
+
+▸ <code>/renamecategory &lt;old&gt;,&lt;new&gt;</code>
+  Rename a category.
+  Example:  <code>/renamecategory Anatomy,Gross Anatomy</code>
+
+▸ <code>/setcategoryemoji &lt;name&gt;,&lt;emoji&gt;</code>
+  Change the emoji for a category.
+  Example:  <code>/setcategoryemoji Anatomy,🦴</code>
+
+▸ <code>/reordercategory &lt;name&gt;,&lt;position&gt;</code>
+  Set the display order of a category (lower = appears first).
+  Example:  <code>/reordercategory Anatomy,1</code>
+
+▸ <code>/deletecategory &lt;name&gt;</code>
+  Delete a category. Its folders are moved to Uncategorized.
+  Example:  <code>/deletecategory Old Category</code>
+
+
+<b>📖 Content Catalog</b>
+
+▸ <code>/catalog</code>
+  Force-regenerate and publish the Telegra.ph catalog (admin).
+  Users also use /catalog to get the current catalog URL.
+
+▸ <code>/catalogurl</code>
+  Get the current catalog URL without regenerating.
 """
 
 _ADMIN_COMMANDS_2 = """
@@ -295,8 +364,20 @@ async def commands_reference(message: types.Message):
 
     is_admin = str(message.from_user.id) in ADMIN_IDS
 
+    # Fetch bot username for the inline search example
+    try:
+        from utils.bot_ref import get_bot
+        bot = get_bot()
+        me = await bot.me()
+        bot_username = me.username or "YourBot"
+    except Exception:
+        bot_username = "YourBot"
+
     # Send user section first
-    await message.reply(_USER_COMMANDS.strip().format(bot_name=BOT_NAME), parse_mode=ParseMode.HTML)
+    await message.reply(
+        _USER_COMMANDS.strip().format(bot_name=BOT_NAME, bot_username=bot_username),
+        parse_mode=ParseMode.HTML
+    )
 
     # Send admin section only to admins (split into two messages to stay under Telegram's 4096-char limit)
     if is_admin:

@@ -55,6 +55,17 @@ def initialize_database():
             )
         ''')
 
+        # ── Categories ────────────────────────────────────────────────────────
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS categories (
+                id         SERIAL PRIMARY KEY,
+                name       TEXT    NOT NULL UNIQUE,
+                emoji      TEXT    DEFAULT '📁',
+                sort_order INTEGER DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        ''')
+
         # ── Folders ───────────────────────────────────────────────────────────
         cur.execute('''
             CREATE TABLE IF NOT EXISTS folders (
@@ -344,6 +355,77 @@ def initialize_database():
             'ON pending_replications(status) WHERE status = \'pending\''
         )
 
+        # ── Phase 1 migrations: categories & search ───────────────────────────
+        # Enable pg_trgm for fuzzy/similarity search (idempotent on Supabase)
+        try:
+            cur.execute('CREATE EXTENSION IF NOT EXISTS pg_trgm')
+            logging.info("pg_trgm extension enabled.")
+        except Exception as _ext_err:
+            logging.warning(
+                f"Could not create pg_trgm extension: {_ext_err}. "
+                "Fuzzy search will fall back to prefix matching only. "
+                "To enable, run: CREATE EXTENSION pg_trgm; in Supabase SQL editor."
+            )
+            conn.rollback()
+            conn = get_connection()
+            cur = conn.cursor()
+
+        # Add category_id FK to folders
+        _safe_alter(cur, 'folders', 'category_id',
+                    'INTEGER REFERENCES categories(id) ON DELETE SET NULL')
+
+        # Add search_vector column to folders
+        _safe_alter(cur, 'folders', 'search_vector', 'tsvector')
+
+        # Backfill search_vector for all existing rows
+        cur.execute(
+            "UPDATE folders SET search_vector = to_tsvector('english', name) "
+            "WHERE search_vector IS NULL"
+        )
+
+        # GIN index for full-text search
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_folders_search '
+            'ON folders USING GIN(search_vector)'
+        )
+        # Index for category lookups
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_folders_category '
+            'ON folders(category_id)'
+        )
+        # Trigram index — created in a try/except since pg_trgm may not be available
+        try:
+            cur.execute(
+                'CREATE INDEX IF NOT EXISTS idx_folders_name_trgm '
+                'ON folders USING GIN(name gin_trgm_ops)'
+            )
+        except Exception as _trgm_err:
+            logging.warning(f"Could not create trigram index: {_trgm_err}. Fuzzy search disabled.")
+            conn.rollback()
+            conn = get_connection()
+            cur = conn.cursor()
+
+        # Catalog config: store Telegra.ph token & page path
+        cur.execute("SELECT 1 FROM payment_config WHERE key = 'telegraph_access_token'")
+        if not cur.fetchone():
+            cur.execute(
+                "INSERT INTO payment_config (key, value_text) VALUES ('telegraph_access_token', '') "
+                "ON CONFLICT (key) DO NOTHING"
+            )
+        cur.execute("SELECT 1 FROM payment_config WHERE key = 'telegraph_page_path'")
+        if not cur.fetchone():
+            cur.execute(
+                "INSERT INTO payment_config (key, value_text) VALUES ('telegraph_page_path', '') "
+                "ON CONFLICT (key) DO NOTHING"
+            )
+        # Catalog auto-update rate-limit timestamp
+        cur.execute("SELECT 1 FROM payment_config WHERE key = 'catalog_last_generated'")
+        if not cur.fetchone():
+            cur.execute(
+                "INSERT INTO payment_config (key, value_text) VALUES ('catalog_last_generated', '') "
+                "ON CONFLICT (key) DO NOTHING"
+            )
+
         conn.commit()
         logging.info("Database initialised successfully.")
     except Exception as e:
@@ -444,4 +526,108 @@ def add_user_to_db(user_id: int, username: str = None, first_name: str = None):
                 first_name = COALESCE(EXCLUDED.first_name, users.first_name)
         ''',
         (user_id, username, first_name)
+    )
+
+
+# ── Search helper ──────────────────────────────────────────────────────────────
+
+def search_folders(query: str, limit: int = 15):
+    """
+    Layered folder search: exact → prefix → full-text (tsvector) → fuzzy (trigram).
+    Returns list of (folder_id, name, file_count, premium, admin_approval, category_name).
+    Each layer is tried; first non-empty result wins.
+    """
+    conn = get_connection()
+    _base = '''
+        SELECT f.id, f.name,
+               COUNT(fi.id) AS file_count,
+               f.premium, f.admin_approval,
+               c.name AS category_name
+        FROM folders f
+        LEFT JOIN files fi     ON fi.folder_id = f.id
+        LEFT JOIN categories c ON c.id = f.category_id
+        WHERE f.parent_id IS NULL
+    '''
+    try:
+        cur = conn.cursor()
+
+        # Layer 1: exact match (case-insensitive)
+        cur.execute(
+            _base + " AND LOWER(f.name) = LOWER(%s) GROUP BY f.id, c.name ORDER BY f.name LIMIT %s",
+            (query, limit)
+        )
+        rows = cur.fetchall()
+        if rows:
+            return rows
+
+        # Layer 2: prefix match
+        cur.execute(
+            _base + " AND LOWER(f.name) LIKE LOWER(%s) GROUP BY f.id, c.name ORDER BY f.name LIMIT %s",
+            (query + '%', limit)
+        )
+        rows = cur.fetchall()
+        if rows:
+            return rows
+
+        # Layer 3: substring / contains match
+        cur.execute(
+            _base + " AND LOWER(f.name) LIKE '%' || LOWER(%s) || '%' GROUP BY f.id, c.name ORDER BY f.name LIMIT %s",
+            (query, limit)
+        )
+        rows = cur.fetchall()
+        if rows:
+            return rows
+
+        # Layer 4: full-text search (tsvector)
+        try:
+            cur.execute(
+                _base + """
+                    AND f.search_vector @@ plainto_tsquery('english', %s)
+                    GROUP BY f.id, c.name
+                    ORDER BY ts_rank(f.search_vector, plainto_tsquery('english', %s)) DESC
+                    LIMIT %s
+                """,
+                (query, query, limit)
+            )
+            rows = cur.fetchall()
+            if rows:
+                return rows
+        except Exception:
+            pass
+
+        # Layer 5: fuzzy trigram similarity (requires pg_trgm)
+        try:
+            cur.execute(
+                _base + """
+                    AND f.name %% %s
+                    GROUP BY f.id, c.name
+                    ORDER BY similarity(f.name, %s) DESC
+                    LIMIT %s
+                """,
+                (query, query, limit)
+            )
+            rows = cur.fetchall()
+            return rows
+        except Exception:
+            pass
+
+        return []
+    finally:
+        _release(conn)
+
+
+# ── Catalog config helpers ─────────────────────────────────────────────────────
+
+def get_catalog_config(key: str) -> str:
+    """Read a catalog config value from payment_config table."""
+    row = db_fetchone("SELECT value_text FROM payment_config WHERE key = %s", (key,))
+    return row[0] if row and row[0] else ''
+
+
+def set_catalog_config(key: str, value: str) -> None:
+    """Write a catalog config value to payment_config table."""
+    db_execute(
+        "INSERT INTO payment_config (key, value_text) VALUES (%s, %s) "
+        "ON CONFLICT (key) DO UPDATE SET value_text = EXCLUDED.value_text",
+        (key, value)
     )
