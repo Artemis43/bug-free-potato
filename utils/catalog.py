@@ -92,20 +92,49 @@ def _build_nodes(bot_username: str) -> list:
     total_folders = 0
     total_files = 0
 
+    # Clean introduction block
+    nodes.append({
+        "tag": "blockquote",
+        "children": [
+            {"tag": "strong", "children": [f"⚡ Welcome to the {BOT_NAME} Catalog!"]},
+            {"tag": "br"},
+            "Browse our organized library of files and resources. Click any folder title below to open it directly in the Telegram bot and download its content instantly."
+        ]
+    })
+    nodes.append({"tag": "hr"})
+
     def folder_node(fid, fname, premium, paid, fcount, botu):
-        """Build a paragraph node for a single folder."""
+        """Build a list item node for a single folder."""
         nonlocal total_folders, total_files
         total_folders += 1
         total_files += fcount or 0
-        badge = " ⭐" if premium else (" 💰" if paid else "")
+        
         deep_link = f"https://t.me/{botu}?start=dl_{fid}"
+        
+        children = [
+            {"tag": "strong", "children": [
+                {"tag": "a", "attrs": {"href": deep_link}, "children": [fname]}
+            ]}
+        ]
+        
+        # Add modern badges inside code tags
+        if premium:
+            children.extend([" ", {"tag": "code", "children": ["⭐ Premium"]}])
+        elif paid:  # paid maps to f.admin_approval in this legacy code
+            children.extend([" ", {"tag": "code", "children": ["🔑 Requires Approval"]}])
+            
+        # Add file count divider and stats
+        children.extend([
+            " · ",
+            {"tag": "em", "children": [f"{fcount} file{'s' if fcount != 1 else ''}"]}
+        ])
+        
         return {
-            "tag": "p",
-            "children": [
-                f"📁 {fname}{badge} ({fcount} file{'s' if fcount != 1 else ''}) — ",
-                {"tag": "a", "attrs": {"href": deep_link}, "children": ["Open in Bot"]},
-            ],
+            "tag": "li",
+            "children": children
         }
+
+    first = True
 
     for cat_id, cat_name, emoji in categories:
         folders = db_fetchall("""
@@ -120,26 +149,42 @@ def _build_nodes(bot_username: str) -> list:
         if not folders:
             continue
 
+        if not first:
+            nodes.append({"tag": "hr"})
+        first = False
+
         # Category header
-        nodes.append({"tag": "h3", "children": [f"{emoji} {cat_name} ({len(folders)} folders)"]})
+        nodes.append({"tag": "h3", "children": [f"{emoji} {cat_name}"]})
+        
+        li_nodes = []
         for fid, fname, premium, paid, fcount in folders:
-            nodes.append(folder_node(fid, fname, premium, paid, fcount or 0, bot_username))
+            li_nodes.append(folder_node(fid, fname, premium, paid, fcount or 0, bot_username))
+            
+        nodes.append({"tag": "ul", "children": li_nodes})
 
     # Uncategorized section
     if uncat_folders:
-        nodes.append({"tag": "h3", "children": [f"📦 Uncategorized ({len(uncat_folders)} folders)"]})
+        if not first:
+            nodes.append({"tag": "hr"})
+        first = False
+        
+        nodes.append({"tag": "h3", "children": ["📦 Uncategorized"]})
+        
+        li_nodes = []
         for fid, fname, premium, paid, fcount in uncat_folders:
-            nodes.append(folder_node(fid, fname, premium, paid, fcount or 0, bot_username))
+            li_nodes.append(folder_node(fid, fname, premium, paid, fcount or 0, bot_username))
+            
+        nodes.append({"tag": "ul", "children": li_nodes})
 
     # Summary footer
+    nodes.append({"tag": "hr"})
     now_str = datetime.now().strftime("%d %b %Y at %H:%M")
-    nodes.append({"tag": "p", "children": [{"tag": "em", "children": [
-        f"📊 Total: {total_folders} folder{'s' if total_folders != 1 else ''} · "
-        f"{total_files} file{'s' if total_files != 1 else ''}"
-    ]}]})
-    nodes.append({"tag": "p", "children": [{"tag": "em", "children": [
-        f"🕒 Last updated: {now_str}"
-    ]}]})
+    nodes.append({
+        "tag": "aside",
+        "children": [
+            f"📊 Total: {total_folders} folder{'s' if total_folders != 1 else ''} · {total_files} file{'s' if total_files != 1 else ''} | 🕒 Last updated: {now_str} (UTC)"
+        ]
+    })
 
     return nodes
 

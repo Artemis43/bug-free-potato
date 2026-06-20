@@ -281,12 +281,12 @@ async def inline_search_handler(inline_query: types.InlineQuery):
 
         description = f"{file_count} file{'s' if file_count != 1 else ''} · {badge_text}{cat_info}"
 
-        # The message sent when user taps the result
+        # The message sent when user taps the result and shares it
         msg_text = (
             f"{icon} <b>{esc(name)}</b>\n"
             f"📄 {file_count} file{'s' if file_count != 1 else ''}\n"
             f"🏷 {badge_text}{cat_info}\n\n"
-            f"👉 <a href=\"{deep_link}\">Open in Bot to Download</a>"
+            f"👉 <a href=\"{deep_link}\">View &amp; Download in Bot</a>"
         )
 
         articles.append(

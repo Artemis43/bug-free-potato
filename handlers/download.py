@@ -234,7 +234,7 @@ async def _run_download(
             await asyncio.sleep(file_interval)
 
     # ── Completion / cancellation ─────────────────────────────────────────
-    sent_count  = progress.get_state(chat_id)["sent"] if progress.get_state(chat_id) else 0
+    sent_count    = progress.get_state(chat_id)["sent"] if progress.get_state(chat_id) else 0
     was_cancelled = progress.is_cancelled(chat_id)
     progress.finish_download(chat_id)
 
@@ -245,23 +245,30 @@ async def _run_download(
             (user_id, folder_id)
         )
 
-    # Remove cancel button from progress message
+    # ── Update the progress card: remove Cancel button, show final status ──
     try:
         status_prefix = "\u274c Cancelled" if was_cancelled else "\u2705 Complete"
-        if not was_cancelled and messages_to_delete:
-            body = (
+        if was_cancelled:
+            progress_body = (
+                "\u26a0\ufe0f Download cancelled by you.\n"
+                + (f"\u23f3 The {sent_count} file(s) already sent will be "
+                   f"<b>auto-deleted in {delete_time // 60} min</b>.\n"
+                   "\U0001f4be Forward them to <b>Saved Messages</b> now!"
+                   if messages_to_delete else
+                   "No files were sent.")
+            )
+        else:
+            progress_body = (
                 f"\u23f3 Files will be <b>auto-deleted in {delete_time // 60} min</b>.\n"
-                f"\U0001f4be Forward them to <b>Saved Messages</b> now!"
+                "\U0001f4be Forward them to <b>Saved Messages</b> now!"
             )
             if unavailable:
-                body += f"\n\n\u26a0\ufe0f {unavailable} file(s) couldn't be served right now."
-        else:
-            body = "\u26a0\ufe0f Download was cancelled. No further files will be sent."
+                progress_body += f"\n\n\u26a0\ufe0f {unavailable} file(s) couldn't be served right now."
 
         final_progress_text = (
             f"{status_prefix}: "
             f"<b>{sent_count}/{n} files</b> from <code>{esc(folder_name)}</code>\n\n"
-            + body
+            + progress_body
         )
         await bot.edit_message_text(
             final_progress_text,
@@ -273,26 +280,32 @@ async def _run_download(
     except Exception:
         pass
 
-    if was_cancelled or not messages_to_delete:
+    # If nothing was sent, nothing to delete — exit early
+    if not messages_to_delete:
         return
 
-    # ── Schedule deletion ─────────────────────────────────────────────────
+    # ── Schedule deletion of every sent file (even on cancellation) ────────
     await asyncio.sleep(delete_time)
 
+    deleted = 0
     for msg_id in messages_to_delete:
         try:
             await bot.delete_message(chat_id, msg_id)
+            deleted += 1
         except TelegramBadRequest:
             continue
         except Exception as e:
-            logging.error(f"Error deleting message {msg_id}: {e}")
+            log.error(f"Error deleting message {msg_id}: {e}")
 
+    # ── Send a NEW message to notify deletion (not an edit of the progress card)
     try:
-        await bot.edit_message_text(
-            "\U0001f5d1 Downloaded files have been deleted.\n"
-            "\U0001f4da All the best with your studies! \U0001f31f",
-            chat_id=chat_id,
-            message_id=prog_msg.message_id,
+        await bot.send_message(
+            chat_id,
+            "\U0001f5d1 <b>Auto-deleted!</b>\n\n"
+            f"The {deleted} file(s) from <code>{esc(folder_name)}</code> "
+            "have been removed from this chat.\n"
+            "\U0001f4da Saved them? All the best with your studies! \U0001f31f",
+            parse_mode=ParseMode.HTML,
         )
     except Exception:
         pass
@@ -615,6 +628,65 @@ async def trigger_folder_download(user_id: int, folder_id: int, chat_id: int,
         bot, chat_id, user_id, folder_id, reply_fn,
         callback_query_id=callback_query_id,
         ui_message_id=ui_message_id,
+    )
+
+
+async def handle_folder_download_by_id(user_id: int, folder_id: int, chat_id: int):
+    """Called from deep links (start=dl_<folder_id>) — from catalog or inline results.
+
+    Shows a folder info card with a ⬇️ Download button so the user sees the
+    folder details before committing.  The actual download starts only when
+    they press the button (which routes through the normal dl: callback).
+    """
+    bot = get_bot()
+
+    folder_row = db_fetchone(
+        'SELECT id, name, premium, admin_approval FROM folders WHERE id = %s',
+        (folder_id,)
+    )
+    if not folder_row:
+        await bot.send_message(
+            chat_id,
+            "❌ <b>Folder not found.</b>\n\nIt may have been removed. Use /start to browse all folders.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    fid, fname, is_premium, is_paid = folder_row
+    file_count = db_fetchone(
+        'SELECT COUNT(*) FROM files WHERE folder_id = %s', (fid,)
+    )
+    file_count = file_count[0] if file_count else 0
+
+    # Category info
+    cat_row = db_fetchone(
+        '''SELECT c.emoji, c.name FROM categories c
+           JOIN folders f ON f.category_id = c.id
+           WHERE f.id = %s''',
+        (fid,)
+    )
+    cat_text = f"  {cat_row[0]} {esc(cat_row[1])}\n" if cat_row else ""
+
+    if is_premium:
+        badge = "⭐ Premium"
+    elif is_paid:
+        badge = "💰 Paid"
+    else:
+        badge = "🆓 Free"
+
+    kb = InlineBuilder()
+    kb.row(InlineKeyboardButton(f"⬇️ Download {esc(fname)}", callback_data=f"dl:{fid}"))
+    kb.row(InlineKeyboardButton("🔙 Back to Menu", callback_data="cat_main"))
+
+    await bot.send_message(
+        chat_id,
+        f"📁 <b>{esc(fname)}</b>\n"
+        f"{cat_text}"
+        f"📄 {file_count} file{'s' if file_count != 1 else ''}\n"
+        f"🏷 {badge}\n\n"
+        f"Tap the button below to start your download.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=kb.build(),
     )
 
 
