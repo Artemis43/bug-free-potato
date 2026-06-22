@@ -1,4 +1,4 @@
-from utils.keyboard import InlineBuilder
+from utils.keyboard import InlineBuilder, InlineKeyboardButton
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from aiogram import Router
 from aiogram.enums import ParseMode
@@ -37,7 +37,7 @@ from datetime import datetime, timedelta
 from aiogram import types
 from aiogram import Router
 from aiogram.enums import ParseMode
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
+from aiogram.types import InlineKeyboardMarkup, LabeledPrice
 from aiogram import Router
 from aiogram.enums import ParseMode
 

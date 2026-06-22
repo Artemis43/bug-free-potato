@@ -159,7 +159,22 @@ async def send_ui(chat_id: int, message_id: int = None,
 
         # Utility buttons
         keyboard.row(InlineKeyboardButton("🔍 Search Folders", callback_data="search"))
-        keyboard.row(InlineKeyboardButton("📖 Full Content Catalog", callback_data="catalog"))
+        
+        # Get or generate catalog URL to link directly to it
+        from utils.catalog import get_catalog_url, generate_catalog
+        catalog_url = get_catalog_url()
+        if not catalog_url:
+            try:
+                me = await bot.me()
+                catalog_url = await generate_catalog(me.username)
+            except Exception as e:
+                logging.warning(f"Failed to auto-generate catalog in send_ui: {e}")
+
+        if catalog_url:
+            keyboard.row(InlineKeyboardButton("📖 Full Content Catalog", url=catalog_url))
+        else:
+            keyboard.row(InlineKeyboardButton("📖 Full Content Catalog", callback_data="catalog"))
+
         keyboard.row(InlineKeyboardButton("🔄 Refresh", callback_data="cat_main"))
 
         if not is_premium_user:

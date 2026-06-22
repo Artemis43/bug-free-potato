@@ -18,7 +18,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import API_TOKEN, ADMIN_IDS, LOG_LEVEL
+from config import API_TOKEN, ADMIN_IDS, LOG_LEVEL, ADMIN_GROUP_ID
 from keep_alive import keep_alive
 from utils.bot_ref import set_bot, set_dispatcher
 
@@ -144,7 +144,20 @@ async def global_error_handler(event: types.ErrorEvent) -> bool:
         except Exception:
             pass
 
-    if ADMIN_IDS:
+    # Determine the target for error notifications (priority: ADMIN_GROUP_ID, fallback: first ADMIN_ID)
+    target_id = None
+    if ADMIN_GROUP_ID:
+        try:
+            target_id = int(ADMIN_GROUP_ID)
+        except ValueError:
+            pass
+    if not target_id and ADMIN_IDS:
+        try:
+            target_id = int(ADMIN_IDS[0])
+        except ValueError:
+            pass
+
+    if target_id:
         try:
             exc_summary = str(exception)[:300]
             admin_msg = (
@@ -154,7 +167,7 @@ async def global_error_handler(event: types.ErrorEvent) -> bool:
                 f"<b>User:</b> <code>{user_id}</code> (@{user_name or 'unknown'})\n"
                 f"<b>Input:</b> <code>{str(cmd_text or '')[:200]}</code>"
             )
-            await bot.send_message(int(ADMIN_IDS[0]), admin_msg)
+            await bot.send_message(target_id, admin_msg)
         except Exception:
             pass
 

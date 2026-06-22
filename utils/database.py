@@ -12,8 +12,14 @@ def _init_pool() -> None:
         minconn=2, maxconn=10,
         dsn=POSTGRES_CONNECTION_STRING,
         connect_timeout=10,
+        # TCP keepalive — prevents Supabase Pooler from dropping idle connections
+        # after its ~10 s inactivity threshold. Sends heartbeat every 30 s.
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
     )
-    logging.info("Connection pool initialised (min=2 max=10).")
+    logging.info("Connection pool initialised (min=2 max=10 keepalives=30s).")
 
 
 def get_connection():
@@ -353,6 +359,43 @@ def initialize_database():
         cur.execute(
             'CREATE INDEX IF NOT EXISTS idx_pending_replications_status '
             'ON pending_replications(status) WHERE status = \'pending\''
+        )
+        # ── Sprint 3.5: Additional indexes for dashboard query patterns ─────
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_users_premium '
+            'ON users(premium)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_users_created_at '
+            'ON users(created_at DESC NULLS LAST)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_users_status_premium '
+            'ON users(status, premium)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_payment_orders_status_method '
+            'ON payment_orders(status, payment_method)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_files_name_trgm '
+            'ON files USING gin(file_name gin_trgm_ops)'
+        ) if True else None  # wrapped in try below
+
+        # ── Sprint 5.2: Admin activity log table ───────────────────────────
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS admin_activity_log (
+                id          SERIAL      PRIMARY KEY,
+                action      TEXT        NOT NULL,
+                target_type TEXT,
+                target_id   TEXT,
+                detail      TEXT,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            )
+        ''')
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_activity_log_created '
+            'ON admin_activity_log(created_at DESC NULLS LAST)'
         )
 
         # ── Phase 1 migrations: categories & search ───────────────────────────

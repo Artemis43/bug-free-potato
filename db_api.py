@@ -152,184 +152,514 @@ def get_stats():
         }
     }
 
-def get_all_data():
-    # 1. Categories
-    categories_raw = db.db_fetchall("SELECT id, name, emoji, sort_order, created_at FROM categories ORDER BY sort_order, name")
-    categories = []
-    for r in categories_raw:
-        categories.append({
-            "id": r[0],
-            "name": r[1],
-            "emoji": r[2],
-            "sort_order": r[3],
-            "created_at": r[4]
-        })
-        
-    # 2. Folders
-    folders_raw = db.db_fetchall("""
-        SELECT f.id, f.name, f.parent_id, f.category_id, f.premium, f.admin_approval, f.download_count,
-               (SELECT COUNT(*) FROM files WHERE folder_id = f.id) as file_count,
-               c.name as category_name
+def get_stats_fast():
+    """Consolidated stats in a single CTE query — replaces 10 sequential SELECTs."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    row = db.db_fetchone("""
+        WITH user_stats AS (
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE premium = TRUE)                          AS premium,
+                COUNT(*) FILTER (WHERE created_at >= %s)                        AS today,
+                COUNT(*) FILTER (WHERE status = 'pending')                      AS pending
+            FROM users
+        ),
+        folder_stats AS (
+            SELECT
+                COUNT(*)                                                         AS total,
+                COUNT(*) FILTER (WHERE NOT premium AND NOT admin_approval)      AS free,
+                COUNT(*) FILTER (WHERE premium     AND NOT admin_approval)      AS prem,
+                COUNT(*) FILTER (WHERE admin_approval)                          AS paid,
+                COALESCE(SUM(download_count), 0)                               AS downloads
+            FROM folders
+        ),
+        cat_stats   AS (SELECT COUNT(*) AS total FROM categories),
+        file_stats  AS (SELECT COUNT(*) AS total FROM files),
+        rev_stats   AS (
+            SELECT
+                COALESCE(SUM(amount_paise) FILTER (WHERE payment_method != 'stars'), 0) AS inr_paise,
+                COALESCE(SUM(amount_paise) FILTER (WHERE payment_method = 'stars'),  0) AS stars
+            FROM payment_orders WHERE status = 'paid'
+        )
+        SELECT
+            u.total, u.premium, u.today, u.pending,
+            f.total, f.free, f.prem, f.paid, f.downloads,
+            c.total,
+            fi.total,
+            r.inr_paise, r.stars
+        FROM user_stats u, folder_stats f, cat_stats c, file_stats fi, rev_stats r
+    """, (today_start,))
+
+    if not row:
+        return {}
+
+    return {
+        "users": {
+            "total":   row[0],
+            "premium": row[1],
+            "today":   row[2],
+            "pending": row[3],
+        },
+        "structure": {
+            "categories":    row[9],
+            "folders":        row[4],
+            "folders_free":   row[5],
+            "folders_premium":row[6],
+            "folders_paid":   row[7],
+            "files":          row[10],
+        },
+        "downloads": row[8],
+        "revenue": {
+            "inr":   (row[11] or 0) / 100.0,
+            "stars":  row[12] or 0,
+        },
+    }
+
+
+def get_stats():
+    """Legacy wrapper — now backed by the fast single-query version."""
+    return get_stats_fast()
+
+
+def _build_folders(conn):
+    """Fetch folders with file_count using a single GROUP BY query (no correlated subqueries)."""
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT
+            f.id, f.name, f.parent_id, f.category_id,
+            f.premium, f.admin_approval, f.download_count,
+            COUNT(fi.id) AS file_count,
+            c.name        AS category_name,
+            COALESCE(pfp.amount_paise, 0) AS price_inr_paise,
+            COALESCE(sfp.amount_stars, 0) AS price_stars
         FROM folders f
-        LEFT JOIN categories c ON c.id = f.category_id
+        LEFT JOIN files           fi  ON fi.folder_id = f.id
+        LEFT JOIN categories      c   ON c.id = f.category_id
+        LEFT JOIN payment_folder_prices pfp ON pfp.folder_id = f.id
+        LEFT JOIN stars_folder_prices   sfp ON sfp.folder_id = f.id
+        GROUP BY f.id, c.name, pfp.amount_paise, sfp.amount_stars
         ORDER BY f.name
     """)
+    rows = cur.fetchall()
     folders = []
-    for r in folders_raw:
-        # Determine folder type flag: 'free', 'premium', 'paid'
+    for r in rows:
         ftype = 'free'
-        if r[4]:  # premium
-            ftype = 'premium'
-        elif r[5]:  # admin_approval (paid)
-            ftype = 'paid'
-            
+        if r[4]:   ftype = 'premium'
+        elif r[5]: ftype = 'paid'
         folders.append({
-            "id": r[0],
-            "name": r[1],
-            "parent_id": r[2],
-            "category_id": r[3],
-            "category_name": r[8] or "Uncategorized",
-            "premium": r[4],
+            "id":             r[0],
+            "name":           r[1],
+            "parent_id":      r[2],
+            "category_id":    r[3],
+            "category_name":  r[8] or "Uncategorized",
+            "premium":        r[4],
             "admin_approval": r[5],
-            "type": ftype,
+            "type":           ftype,
             "download_count": r[6],
-            "file_count": r[7]
+            "file_count":     r[7],
         })
-        
-    # 3. Files
-    files_raw = db.db_fetchall("SELECT id, folder_id, file_id, file_name, file_type, message_id, caption FROM files ORDER BY id DESC LIMIT 1000")
-    files = []
-    for r in files_raw:
-        files.append({
-            "id": r[0],
-            "folder_id": r[1],
-            "file_id": r[2],
-            "file_name": r[3],
-            "file_type": r[4],
-            "message_id": r[5],
-            "caption": r[6]
-        })
-        
-    # 4. Users (limit to 2000 recent users to avoid massive payloads, sorted by created_at DESC)
+    return folders
+
+
+def get_core_data():
+    """
+    Lean initial payload — loads only what the Overview, Categories, and Folders
+    tabs need.  Users, Files, Approvals are fetched lazily per-tab.
+
+    Queries batched into as few round-trips as possible via a single connection.
+    """
+    conn = db.get_connection()
+    try:
+        cur = conn.cursor()
+
+        # ── 1. Categories ──────────────────────────────────────────────────────
+        cur.execute("SELECT id, name, emoji, sort_order, created_at FROM categories ORDER BY sort_order, name")
+        categories = [
+            {"id": r[0], "name": r[1], "emoji": r[2], "sort_order": r[3], "created_at": r[4]}
+            for r in cur.fetchall()
+        ]
+
+        # ── 2. Folders (GROUP BY replaces correlated subquery) ─────────────────
+        folders = _build_folders(conn)
+
+        # ── 3. Caption ─────────────────────────────────────────────────────────
+        cur.execute("SELECT caption_type, custom_text FROM current_caption ORDER BY id DESC LIMIT 1")
+        caption_row = cur.fetchone()
+        caption = {
+            "caption_type": caption_row[0] if caption_row else "custom",
+            "custom_text":  caption_row[1] if caption_row else "",
+        }
+
+        # ── 4. Pricing config (batch both keys in one query) ───────────────────
+        cur.execute(
+            "SELECT key, value_int FROM payment_config WHERE key IN (%s, %s)",
+            ('default_folder_price_paise', 'default_folder_price_stars')
+        )
+        price_config = {r[0]: r[1] for r in cur.fetchall()}
+        default_price_inr   = (price_config.get('default_folder_price_paise', 9900) or 9900) / 100.0
+        default_price_stars = price_config.get('default_folder_price_stars', 50) or 50
+
+        # ── 5. Per-folder price overrides (batch) ──────────────────────────────
+        cur.execute("SELECT folder_id, amount_paise FROM payment_folder_prices")
+        inr_prices = {r[0]: r[1] / 100.0 for r in cur.fetchall()}
+
+        cur.execute("SELECT folder_id, amount_stars FROM stars_folder_prices")
+        stars_prices = {r[0]: r[1] for r in cur.fetchall()}
+
+        # ── 6. Storage channels ────────────────────────────────────────────────
+        cur.execute("SELECT id, chat_id, title, active FROM storage_channels ORDER BY id")
+        storage_channels = [
+            {"id": r[0], "chat_id": str(r[1]), "title": r[2] or f"Channel #{r[0]}", "active": r[3]}
+            for r in cur.fetchall()
+        ]
+
+    finally:
+        db._release(conn)
+
+    # ── 7. Stats (single CTE query, separate connection) ──────────────────────
+    stats = get_stats_fast()
+
+    return {
+        "categories":    categories,
+        "folders":       folders,
+        "caption":       caption,
+        "folder_prices": {
+            "inr":           inr_prices,
+            "stars":         stars_prices,
+            "default_inr":   default_price_inr,
+            "default_stars": default_price_stars,
+        },
+        "storage_channels": storage_channels,
+        "stats":         stats,
+        # Stub empty arrays so existing frontend code doesn't break immediately;
+        # the dashboard will replace these via lazy per-tab fetches.
+        "users":  [],
+        "files":  [],
+        "folder_approvals": [],
+        "payment_plans": [],
+        "stars_payment_plans": [],
+        "forced_subs": [],
+    }
+
+
+def get_all_data():
+    """
+    Legacy full-payload action kept for backwards compatibility.
+    New dashboards should call get_core + per-tab lazy actions.
+    Still faster than before thanks to the consolidated stat query
+    and GROUP BY folders query.
+    """
+    core = get_core_data()
+
+    # ── Users ──────────────────────────────────────────────────────────────────
     users_raw = db.db_fetchall("""
-        SELECT user_id, username, first_name, status, premium, premium_expiration, welcome_sent, last_download, created_at 
-        FROM users 
-        ORDER BY created_at DESC NULLS LAST, user_id DESC 
+        SELECT user_id, username, first_name, status, premium,
+               premium_expiration, welcome_sent, last_download, created_at
+        FROM users
+        ORDER BY created_at DESC NULLS LAST, user_id DESC
         LIMIT 2000
     """)
-    users = []
-    for r in users_raw:
-        users.append({
-            "user_id": str(r[0]), # stringify BIGINT for javascript compatibility
-            "username": r[1],
-            "first_name": r[2],
-            "status": r[3],
-            "premium": r[4],
+    users = [
+        {
+            "user_id":            str(r[0]),
+            "username":           r[1],
+            "first_name":         r[2],
+            "status":             r[3],
+            "premium":            r[4],
             "premium_expiration": r[5],
-            "welcome_sent": r[6],
-            "last_download": r[7],
-            "created_at": r[8]
-        })
-        
-    # 5. Caption config
-    caption_raw = db.db_fetchone("SELECT caption_type, custom_text FROM current_caption ORDER BY id DESC LIMIT 1")
-    caption = {
-        "caption_type": caption_raw[0] if caption_raw else "custom",
-        "custom_text": caption_raw[1] if caption_raw else ""
-    }
-    
-    # 6. Payment plans (INR)
+            "welcome_sent":       r[6],
+            "last_download":      r[7],
+            "created_at":         r[8],
+        }
+        for r in users_raw
+    ]
+
+    # ── Files (limited) ────────────────────────────────────────────────────────
+    files_raw = db.db_fetchall(
+        "SELECT id, folder_id, file_id, file_name, file_type, message_id, caption "
+        "FROM files ORDER BY id DESC LIMIT 1000"
+    )
+    files = [
+        {
+            "id":         r[0], "folder_id":  r[1], "file_id": r[2],
+            "file_name":  r[3], "file_type":  r[4], "message_id": r[5],
+            "caption":    r[6],
+        }
+        for r in files_raw
+    ]
+
+    # ── Plans ──────────────────────────────────────────────────────────────────
     plans_raw = db.db_fetchall("SELECT id, name, amount_paise, days, active FROM payment_plans ORDER BY amount_paise")
-    plans = []
-    for r in plans_raw:
-        plans.append({
-            "id": r[0],
-            "name": r[1],
-            "amount_paise": r[2],
-            "amount_inr": r[2] / 100.0,
-            "days": r[3],
-            "active": r[4]
-        })
-        
-    # 7. Stars payment plans
+    plans = [
+        {"id": r[0], "name": r[1], "amount_paise": r[2], "amount_inr": r[2] / 100.0, "days": r[3], "active": r[4]}
+        for r in plans_raw
+    ]
+
     stars_plans_raw = db.db_fetchall("SELECT id, name, amount_stars, days, active FROM stars_payment_plans ORDER BY amount_stars")
-    stars_plans = []
-    for r in stars_plans_raw:
-        stars_plans.append({
-            "id": r[0],
-            "name": r[1],
-            "amount_stars": r[2],
-            "days": r[3],
-            "active": r[4]
-        })
-        
-    # 8. Custom folder prices
-    inr_prices_raw = db.db_fetchall("SELECT folder_id, amount_paise FROM payment_folder_prices")
-    inr_prices = {r[0]: r[1]/100.0 for r in inr_prices_raw}
-    
-    stars_prices_raw = db.db_fetchall("SELECT folder_id, amount_stars FROM stars_folder_prices")
-    stars_prices = {r[0]: r[1] for r in stars_prices_raw}
-    
-    # Global defaults
-    default_price_inr_row = db.db_fetchone("SELECT value_int FROM payment_config WHERE key = 'default_folder_price_paise'")
-    default_price_inr = (default_price_inr_row[0] / 100.0) if default_price_inr_row else 99.0
-    
-    default_price_stars_row = db.db_fetchone("SELECT value_int FROM payment_config WHERE key = 'default_folder_price_stars'")
-    default_price_stars = default_price_stars_row[0] if default_price_stars_row else 50
-    
-    # 9. Paid folder approvals
+    stars_plans = [
+        {"id": r[0], "name": r[1], "amount_stars": r[2], "days": r[3], "active": r[4]}
+        for r in stars_plans_raw
+    ]
+
+    # ── Approvals ──────────────────────────────────────────────────────────────
     approvals_raw = db.db_fetchall("""
         SELECT ufa.user_id, ufa.folder_id, ufa.approved, ufa.download_completed,
-               u.first_name, u.username, f.name as folder_name
+               u.first_name, u.username, f.name AS folder_name
         FROM user_folder_approval ufa
-        LEFT JOIN users u ON u.user_id = ufa.user_id
-        LEFT JOIN folders f ON f.id = ufa.folder_id
+        LEFT JOIN users   u ON u.user_id  = ufa.user_id
+        LEFT JOIN folders f ON f.id       = ufa.folder_id
         ORDER BY ufa.approved ASC, ufa.user_id DESC
     """)
-    approvals = []
-    for r in approvals_raw:
-        approvals.append({
-            "user_id": str(r[0]),
-            "folder_id": r[1],
-            "approved": r[2],
-            "download_completed": r[3],
-            "first_name": r[4] or f"User {r[0]}",
-            "username": r[5],
-            "folder_name": r[6] or f"Folder #{r[1]}"
-        })
+    approvals = [
+        {
+            "user_id":           str(r[0]),
+            "folder_id":         r[1],
+            "approved":          r[2],
+            "download_completed":r[3],
+            "first_name":        r[4] or f"User {r[0]}",
+            "username":          r[5],
+            "folder_name":       r[6] or f"Folder #{r[1]}",
+        }
+        for r in approvals_raw
+    ]
 
-    # 10. Storage channels
-    from utils.storage import list_storage_channels
-    channels_raw = list_storage_channels(active_only=False)
-    storage_channels = []
-    for r in channels_raw:
-        storage_channels.append({
-            "id": r[0],
-            "chat_id": str(r[1]),
-            "title": r[2] or f"Channel #{r[0]}",
-            "active": r[3]
-        })
-
-    # 11. Forced subscriptions info
+    # ── Forced subs (Telegram API — intentionally last) ────────────────────────
     forced_subs = get_forced_subscriptions()
-    
-    return {
-        "categories": categories,
-        "folders": folders,
-        "files": files,
-        "users": users,
-        "caption": caption,
-        "payment_plans": plans,
+
+    core.update({
+        "users":               users,
+        "files":               files,
+        "payment_plans":       plans,
         "stars_payment_plans": stars_plans,
-        "folder_prices": {
-            "inr": inr_prices,
-            "stars": stars_prices,
-            "default_inr": default_price_inr,
-            "default_stars": default_price_stars
-        },
-        "folder_approvals": approvals,
-        "storage_channels": storage_channels,
-        "forced_subs": forced_subs
+        "folder_approvals":    approvals,
+        "forced_subs":         forced_subs,
+    })
+    return core
+
+
+# ── Per-tab lazy-load actions ──────────────────────────────────────────────────
+
+def get_users_paginated(params):
+    """
+    Server-side paginated, filtered, sorted user list.
+    params: { page, page_size, search, status, premium, sort, dir }
+    """
+    page      = max(1, int(params.get('page', 1)))
+    page_size = min(200, max(10, int(params.get('page_size', 50))))
+    search    = (params.get('search') or '').strip()
+    status_f  = params.get('status', 'all')
+    prem_f    = params.get('premium', 'all')
+    sort_col  = params.get('sort', 'created_at')
+    sort_dir  = 'DESC' if params.get('dir', 'desc').lower() == 'desc' else 'ASC'
+
+    ALLOWED_COLS = {'user_id', 'username', 'first_name', 'status', 'premium',
+                    'premium_expiration', 'created_at', 'last_download'}
+    if sort_col not in ALLOWED_COLS:
+        sort_col = 'created_at'
+
+    conditions = []
+    bind_vals  = []
+
+    if search:
+        conditions.append(
+            "(CAST(user_id AS TEXT) ILIKE %s OR username ILIKE %s OR first_name ILIKE %s)"
+        )
+        like = f"%{search}%"
+        bind_vals.extend([like, like, like])
+
+    if status_f != 'all':
+        conditions.append("status = %s")
+        bind_vals.append(status_f)
+
+    if prem_f == 'premium':
+        conditions.append("premium = TRUE")
+    elif prem_f == 'regular':
+        conditions.append("premium = FALSE")
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    count_row = db.db_fetchone(
+        f"SELECT COUNT(*) FROM users {where}", tuple(bind_vals)
+    )
+    total = count_row[0] if count_row else 0
+
+    offset = (page - 1) * page_size
+    rows = db.db_fetchall(
+        f"""
+        SELECT user_id, username, first_name, status, premium,
+               premium_expiration, welcome_sent, last_download, created_at
+        FROM users
+        {where}
+        ORDER BY {sort_col} {sort_dir} NULLS LAST
+        LIMIT %s OFFSET %s
+        """,
+        tuple(bind_vals) + (page_size, offset)
+    )
+
+    users = [
+        {
+            "user_id":            str(r[0]),
+            "username":           r[1],
+            "first_name":         r[2],
+            "status":             r[3],
+            "premium":            r[4],
+            "premium_expiration": r[5],
+            "welcome_sent":       r[6],
+            "last_download":      r[7],
+            "created_at":         r[8],
+        }
+        for r in rows
+    ]
+
+    import math
+    return {
+        "users": users,
+        "total": total,
+        "page":  page,
+        "pages": math.ceil(total / page_size) if total else 1,
+        "page_size": page_size,
+    }
+
+
+def get_files_paginated(params):
+    """
+    Server-side paginated, filtered file list with folder_name joined in.
+    params: { page, page_size, search, file_type, folder_id }
+    """
+    page      = max(1, int(params.get('page', 1)))
+    page_size = min(200, max(10, int(params.get('page_size', 50))))
+    search    = (params.get('search') or '').strip()
+    type_f    = (params.get('file_type') or 'all').strip()
+    folder_f  = params.get('folder_id')  # int or None
+
+    conditions = []
+    bind_vals  = []
+
+    if search:
+        conditions.append(
+            "(fi.file_name ILIKE %s OR fi.caption ILIKE %s)"
+        )
+        like = f"%{search}%"
+        bind_vals.extend([like, like])
+
+    if type_f and type_f != 'all':
+        conditions.append("fi.file_type ILIKE %s")
+        bind_vals.append(f"%{type_f}%")
+
+    if folder_f:
+        try:
+            conditions.append("fi.folder_id = %s")
+            bind_vals.append(int(folder_f))
+        except (TypeError, ValueError):
+            pass
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    base_q = f"""
+        FROM files fi
+        LEFT JOIN folders f ON f.id = fi.folder_id
+        {where}
+    """
+
+    count_row = db.db_fetchone(f"SELECT COUNT(*) {base_q}", tuple(bind_vals))
+    total = count_row[0] if count_row else 0
+
+    offset = (page - 1) * page_size
+    rows = db.db_fetchall(
+        f"""
+        SELECT fi.id, fi.folder_id, fi.file_id, fi.file_name,
+               fi.file_type, fi.message_id, fi.caption,
+               f.name AS folder_name
+        {base_q}
+        ORDER BY fi.id DESC
+        LIMIT %s OFFSET %s
+        """,
+        tuple(bind_vals) + (page_size, offset)
+    )
+
+    files = [
+        {
+            "id":          r[0],
+            "folder_id":   r[1],
+            "file_id":     r[2],
+            "file_name":   r[3],
+            "file_type":   r[4],
+            "message_id":  r[5],
+            "caption":     r[6],
+            "folder_name": r[7] or "Unknown Folder",
+        }
+        for r in rows
+    ]
+
+    import math
+    return {
+        "files":  files,
+        "total":  total,
+        "page":   page,
+        "pages":  math.ceil(total / page_size) if total else 1,
+        "page_size": page_size,
+    }
+
+
+def get_approvals_data():
+    """All folder purchase approvals with user and folder info joined."""
+    rows = db.db_fetchall("""
+        SELECT ufa.user_id, ufa.folder_id, ufa.approved, ufa.download_completed,
+               u.first_name, u.username, f.name AS folder_name
+        FROM user_folder_approval ufa
+        LEFT JOIN users   u ON u.user_id = ufa.user_id
+        LEFT JOIN folders f ON f.id      = ufa.folder_id
+        ORDER BY ufa.approved ASC, ufa.user_id DESC
+    """)
+    approvals = [
+        {
+            "user_id":            str(r[0]),
+            "folder_id":          r[1],
+            "approved":           r[2],
+            "download_completed": r[3],
+            "first_name":         r[4] or f"User {r[0]}",
+            "username":           r[5],
+            "folder_name":        r[6] or f"Folder #{r[1]}",
+        }
+        for r in rows
+    ]
+    pending = sum(1 for a in approvals if not a['approved'])
+    return {"folder_approvals": approvals, "pending_count": pending}
+
+
+def get_plans_data():
+    """Both Razorpay and Stars payment plans plus default pricing config."""
+    plans_raw = db.db_fetchall(
+        "SELECT id, name, amount_paise, days, active FROM payment_plans ORDER BY amount_paise"
+    )
+    plans = [
+        {"id": r[0], "name": r[1], "amount_paise": r[2],
+         "amount_inr": r[2] / 100.0, "days": r[3], "active": r[4]}
+        for r in plans_raw
+    ]
+
+    stars_raw = db.db_fetchall(
+        "SELECT id, name, amount_stars, days, active FROM stars_payment_plans ORDER BY amount_stars"
+    )
+    stars_plans = [
+        {"id": r[0], "name": r[1], "amount_stars": r[2], "days": r[3], "active": r[4]}
+        for r in stars_raw
+    ]
+
+    cfg = db.db_fetchall(
+        "SELECT key, value_int FROM payment_config WHERE key IN (%s, %s)",
+        ('default_folder_price_paise', 'default_folder_price_stars')
+    )
+    price_cfg = {r[0]: r[1] for r in cfg}
+
+    return {
+        "payment_plans":       plans,
+        "stars_payment_plans": stars_plans,
+        "default_price_inr":   (price_cfg.get('default_folder_price_paise', 9900) or 9900) / 100.0,
+        "default_price_stars": price_cfg.get('default_folder_price_stars', 50) or 50,
     }
 
 def main():
@@ -356,13 +686,37 @@ def main():
 
     try:
         if action == "stats":
-            result = get_stats()
+            result = get_stats_fast()
             print(json.dumps({"ok": True, "data": result}, cls=DateTimeEncoder))
-            
+
+        elif action in ("get_core", "get_core_data"):
+            result = get_core_data()
+            print(json.dumps({"ok": True, "data": result}, cls=DateTimeEncoder))
+
         elif action == "get_all":
             result = get_all_data()
             print(json.dumps({"ok": True, "data": result}, cls=DateTimeEncoder))
-            
+
+        elif action in ("get_users", "get_users_paginated"):
+            result = get_users_paginated(params)
+            print(json.dumps({"ok": True, "data": result}, cls=DateTimeEncoder))
+
+        elif action in ("get_files", "get_files_paginated"):
+            result = get_files_paginated(params)
+            print(json.dumps({"ok": True, "data": result}, cls=DateTimeEncoder))
+
+        elif action in ("get_approvals", "get_approvals_data"):
+            result = get_approvals_data()
+            print(json.dumps({"ok": True, "data": result}, cls=DateTimeEncoder))
+
+        elif action in ("get_plans", "get_plans_data"):
+            result = get_plans_data()
+            print(json.dumps({"ok": True, "data": result}, cls=DateTimeEncoder))
+
+        elif action == "forced_subs":
+            subs = get_forced_subscriptions()
+            print(json.dumps({"ok": True, "data": {"forced_subs": subs}}, cls=DateTimeEncoder))
+
         elif action == "update_caption":
             caption_type = params.get("caption_type", "custom")
             custom_text = params.get("custom_text", "")
@@ -742,6 +1096,95 @@ def main():
             )
             print(json.dumps({"ok": True}))
             
+        elif action == "get_activity_log":
+            limit = int(params.get("limit", 100))
+            offset = int(params.get("offset", 0))
+            rows = db.db_fetchall(
+                """
+                SELECT id, action, target_type, target_id, detail,
+                       created_at AT TIME ZONE 'Asia/Kolkata' as created_at
+                FROM admin_activity_log
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                (limit, offset)
+            )
+            total = db.db_fetchone(
+                "SELECT COUNT(*) FROM admin_activity_log"
+            )[0]
+            log_entries = []
+            for r in (rows or []):
+                log_entries.append({
+                    "id": r[0], "action": r[1],
+                    "target_type": r[2], "target_id": r[3],
+                    "detail": r[4],
+                    "created_at": r[5].isoformat() if r[5] else None
+                })
+            print(json.dumps({"ok": True, "data": {
+                "log": log_entries, "total": total,
+                "limit": limit, "offset": offset
+            }}))
+
+        elif action == "log_activity":
+            db.db_execute(
+                """
+                INSERT INTO admin_activity_log (action, target_type, target_id, detail)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    params.get("action_name", ""),
+                    params.get("target_type", ""),
+                    str(params.get("target_id", "")),
+                    params.get("detail", "")
+                )
+            )
+            print(json.dumps({"ok": True}))
+
+        elif action == "bulk_user_action":
+            bulk_action = params.get("bulk_action", "")
+            user_ids = params.get("user_ids", [])
+            if not isinstance(user_ids, list) or not user_ids:
+                print(json.dumps({"ok": False, "error": "No user IDs provided"}))
+            else:
+                updated = 0
+                if bulk_action == "approve":
+                    db.db_execute(
+                        "UPDATE users SET status = 'approved' WHERE user_id = ANY(%s::bigint[])",
+                        (user_ids,)
+                    )
+                    updated = len(user_ids)
+                elif bulk_action == "ban":
+                    db.db_execute(
+                        "UPDATE users SET status = 'banned' WHERE user_id = ANY(%s::bigint[])",
+                        (user_ids,)
+                    )
+                    updated = len(user_ids)
+                elif bulk_action == "grant_premium":
+                    days = int(params.get("days", 30))
+                    db.db_execute(
+                        """UPDATE users SET premium = TRUE,
+                           premium_expiration = NOW() + (%s || ' days')::interval
+                           WHERE user_id = ANY(%s::bigint[])""",
+                        (str(days), user_ids,)
+                    )
+                    updated = len(user_ids)
+                elif bulk_action == "revoke_premium":
+                    db.db_execute(
+                        "UPDATE users SET premium = FALSE, premium_expiration = NULL WHERE user_id = ANY(%s::bigint[])",
+                        (user_ids,)
+                    )
+                    updated = len(user_ids)
+                else:
+                    print(json.dumps({"ok": False, "error": f"Unknown bulk action: {bulk_action}"}))
+                    return
+                # Log this bulk action
+                db.db_execute(
+                    "INSERT INTO admin_activity_log (action, target_type, target_id, detail) VALUES (%s, %s, %s, %s)",
+                    (f"bulk_{bulk_action}", "users", ",".join(str(u) for u in user_ids[:5]) + ("..." if len(user_ids) > 5 else ""),
+                     f"{updated} users affected")
+                )
+                print(json.dumps({"ok": True, "updated": updated}))
+
         else:
             print(json.dumps({"ok": False, "error": f"Unknown action: {action}"}))
             
