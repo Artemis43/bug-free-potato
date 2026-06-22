@@ -914,6 +914,25 @@ async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
             )
         except Exception:
             pass
+    elif user_status == 'banned':
+        try:
+            kb = InlineBuilder()
+            kb.add(InlineKeyboardButton(
+                "💬 Appeal to Admin",
+                url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"
+            ))
+            await bot.edit_message_text(
+                chat_id=cq.message.chat.id, message_id=cq.message.message_id,
+                text=(
+                    f"Hi {esc(first_name or 'there')}, you have been found to have violated the rules, and hence are now banned. 🚫\n\n"
+                    "If you believe this is a mistake or would like to appeal, "
+                    "please contact the admin directly."
+                ),
+                parse_mode=ParseMode.HTML,
+                reply_markup=kb.build(),
+            )
+        except Exception:
+            pass
     else:
         invalidate_member_cache(user_id)
         if not await is_user_member(user_id):
@@ -1162,6 +1181,22 @@ async def handle_start(message: types.Message):
         await message.answer(
             f"❌ <b>Access Not Approved</b>\n\n"
             f"Hi {name}, your access request was not approved at this time.\n\n"
+            "If you believe this is a mistake or would like to appeal, "
+            "please contact the admin directly.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=kb.build()
+        )
+
+    # ── BANNED ─────────────────────────────────────────────────────────────
+    elif status == 'banned':
+        kb = InlineBuilder()
+        kb.add(InlineKeyboardButton(
+            "💬 Appeal to Admin",
+            url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"
+        ))
+        await message.answer(
+            f"❌ <b>Access Banned</b>\n\n"
+            f"Hi {name}, you have violated the rules and hence are now banned. 🚫\n\n"
             "If you believe this is a mistake or would like to appeal, "
             "please contact the admin directly.",
             parse_mode=ParseMode.HTML,

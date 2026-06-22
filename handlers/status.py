@@ -52,6 +52,7 @@ async def build_status_text(user_id: int, bot=None) -> Tuple[str, Optional[Inlin
         'approved': '✅ Approved',
         'pending':  '⏳ Pending approval',
         'rejected': '❌ Rejected',
+        'banned':   '🚫 Banned',
     }
     lines.append(f"<b>Access:</b>   {status_map.get(user_status, user_status)}")
 
@@ -60,6 +61,8 @@ async def build_status_text(user_id: int, bot=None) -> Tuple[str, Optional[Inlin
             lines.append("\n📋 You'll be notified once the admin reviews your request.")
         elif user_status == 'rejected':
             lines.append(f"\n💬 To appeal, contact: {ADMIN_CONTACT}")
+        elif user_status == 'banned':
+            lines.append(f"\n🚫 You have violated the rules and hence are now banned. 🚫\n💬 To appeal, contact: {ADMIN_CONTACT}")
         return ('\n'.join(lines), None)
 
     # ── Premium status ────────────────────────────────────────────────────
