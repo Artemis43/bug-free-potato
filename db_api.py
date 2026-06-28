@@ -786,14 +786,19 @@ def main():
         elif action == "category_create":
             name = params["name"].strip()
             emoji = params.get("emoji", "📁").strip() or "📁"
-            
+            parent_id = params.get("parent_id")
+            if parent_id is not None and parent_id != "":
+                parent_id = int(parent_id)
+            else:
+                parent_id = None
+
             if db.db_fetchone("SELECT id FROM categories WHERE name = %s", (name,)):
                 print(json.dumps({"ok": False, "error": "A category with this name already exists."}))
                 return
-                
+
             db.db_execute(
-                "INSERT INTO categories (name, emoji) VALUES (%s, %s)",
-                (name, emoji)
+                "INSERT INTO categories (name, emoji, parent_id) VALUES (%s, %s, %s)",
+                (name, emoji, parent_id)
             )
             print(json.dumps({"ok": True}))
             
@@ -802,16 +807,25 @@ def main():
             name = params["name"].strip()
             emoji = params.get("emoji", "📁").strip() or "📁"
             sort_order = int(params.get("sort_order", 0))
-            
+            parent_id = params.get("parent_id")
+            if parent_id is not None and parent_id != "":
+                parent_id = int(parent_id)
+                # Prevent self-reference
+                if parent_id == cat_id:
+                    print(json.dumps({"ok": False, "error": "A category cannot be its own parent."}))
+                    return
+            else:
+                parent_id = None
+
             # Check duplicate name elsewhere
             dup = db.db_fetchone("SELECT id FROM categories WHERE name = %s AND id != %s", (name, cat_id))
             if dup:
                 print(json.dumps({"ok": False, "error": "Another category with this name already exists."}))
                 return
-                
+
             db.db_execute(
-                "UPDATE categories SET name = %s, emoji = %s, sort_order = %s WHERE id = %s",
-                (name, emoji, sort_order, cat_id)
+                "UPDATE categories SET name = %s, emoji = %s, sort_order = %s, parent_id = %s WHERE id = %s",
+                (name, emoji, sort_order, parent_id, cat_id)
             )
             print(json.dumps({"ok": True}))
             
@@ -840,7 +854,21 @@ def main():
             # Update category_id if provided
             if "category_id" in params:
                 db.db_execute("UPDATE folders SET category_id = %s WHERE id = %s", (category_id, folder_id))
-                
+
+            # Update parent_id if provided
+            if "parent_id" in params:
+                new_parent = params["parent_id"]
+                if new_parent is not None and new_parent != "":
+                    new_parent = int(new_parent)
+                    # Cycle check
+                    import utils.database as _db_mod
+                    if _db_mod.has_folder_cycle(folder_id, new_parent):
+                        print(json.dumps({"ok": False, "error": "Circular parent reference detected."}))
+                        return
+                else:
+                    new_parent = None
+                db.db_execute("UPDATE folders SET parent_id = %s WHERE id = %s", (new_parent, folder_id))
+
             # Update folder type flags
             if folder_type:
                 flag_map = {
@@ -853,7 +881,7 @@ def main():
                     "UPDATE folders SET premium = %s, admin_approval = %s WHERE id = %s",
                     (prem, paid, folder_id)
                 )
-                
+
             # If price overrides are provided
             if "price_inr" in params:
                 price_inr = float(params["price_inr"])
@@ -866,7 +894,7 @@ def main():
                     """,
                     (folder_id, price_paise)
                 )
-                
+
             if "price_stars" in params:
                 price_stars = int(params["price_stars"])
                 db.db_execute(
@@ -877,7 +905,7 @@ def main():
                     """,
                     (folder_id, price_stars)
                 )
-                
+
             print(json.dumps({"ok": True}))
             
         elif action == "file_move":
@@ -1184,6 +1212,101 @@ def main():
                      f"{updated} users affected")
                 )
                 print(json.dumps({"ok": True, "updated": updated}))
+
+        elif action == "get_tree":
+            """Return the full hierarchical content tree for the dashboard."""
+            import utils.database as _dbmod
+            # Fetch all categories with parent_id
+            cats_raw = db.db_fetchall("""
+                SELECT id, name, emoji, sort_order, parent_id
+                FROM categories
+                ORDER BY sort_order, name
+            """)
+            # Fetch all folders with counts
+            folders_raw = db.db_fetchall("""
+                SELECT f.id, f.name, COALESCE(f.emoji,'📁'), f.parent_id, f.category_id,
+                       f.premium, f.admin_approval, f.download_count,
+                       COUNT(fi.id) AS file_count
+                FROM folders f
+                LEFT JOIN files fi ON fi.folder_id = f.id
+                GROUP BY f.id
+                ORDER BY COALESCE(f.sort_order,0), f.name
+            """)
+            cats = [
+                {"id": r[0], "name": r[1], "emoji": r[2], "sort_order": r[3], "parent_id": r[4]}
+                for r in (cats_raw or [])
+            ]
+            folders = [
+                {
+                    "id": r[0], "name": r[1], "emoji": r[2],
+                    "parent_id": r[3], "category_id": r[4],
+                    "premium": r[5], "admin_approval": r[6],
+                    "download_count": r[7], "file_count": r[8],
+                    "type": "premium" if r[5] else ("paid" if r[6] else "free"),
+                }
+                for r in (folders_raw or [])
+            ]
+            print(json.dumps({"ok": True, "data": {"categories": cats, "folders": folders}}, cls=DateTimeEncoder))
+
+        elif action == "folder_create":
+            """Create a new folder node from the dashboard (virtual, for content organisation)."""
+            name = params.get("name", "").strip()
+            if not name:
+                print(json.dumps({"ok": False, "error": "Folder name is required"}))
+                return
+            if db.db_fetchone("SELECT id FROM folders WHERE name = %s", (name,)):
+                print(json.dumps({"ok": False, "error": "A folder with this name already exists"}))
+                return
+            parent_id = params.get("parent_id")
+            if parent_id is not None and parent_id != "":
+                parent_id = int(parent_id)
+            else:
+                parent_id = None
+            category_id = params.get("category_id")
+            if category_id is not None and category_id != "":
+                category_id = int(category_id)
+            else:
+                category_id = None
+            emoji = params.get("emoji", "📁").strip() or "📁"
+            description = params.get("description", "").strip() or None
+            folder_type = params.get("type", "free")
+            is_premium = folder_type == "premium"
+            is_paid = folder_type == "paid"
+            db.db_execute(
+                """
+                INSERT INTO folders (name, parent_id, category_id, emoji, description, premium, admin_approval)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (name, parent_id, category_id, emoji, description, is_premium, is_paid)
+            )
+            new_row = db.db_fetchone("SELECT id FROM folders WHERE name = %s", (name,))
+            print(json.dumps({"ok": True, "folder_id": new_row[0] if new_row else None}))
+
+        elif action == "move_node":
+            """Reparent a folder or category. Prevents cycles."""
+            node_type = params.get("type")   # 'folder' | 'category'
+            node_id   = int(params.get("id"))
+            new_parent_id = params.get("parent_id")
+            if new_parent_id is not None and new_parent_id != "":
+                new_parent_id = int(new_parent_id)
+            else:
+                new_parent_id = None
+
+            if node_type == "folder":
+                import utils.database as _dbmod
+                if new_parent_id is not None and _dbmod.has_folder_cycle(node_id, new_parent_id):
+                    print(json.dumps({"ok": False, "error": "Circular parent reference detected."}))
+                    return
+                db.db_execute("UPDATE folders SET parent_id = %s WHERE id = %s", (new_parent_id, node_id))
+                print(json.dumps({"ok": True}))
+            elif node_type == "category":
+                if new_parent_id == node_id:
+                    print(json.dumps({"ok": False, "error": "A category cannot be its own parent."}))
+                    return
+                db.db_execute("UPDATE categories SET parent_id = %s WHERE id = %s", (new_parent_id, node_id))
+                print(json.dumps({"ok": True}))
+            else:
+                print(json.dumps({"ok": False, "error": f"Unknown node type: {node_type}"}))
 
         else:
             print(json.dumps({"ok": False, "error": f"Unknown action: {action}"}))

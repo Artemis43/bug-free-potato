@@ -72,17 +72,29 @@ def initialize_database():
             )
         ''')
 
+        # ── Nested hierarchy migrations for categories ─────────────────────────
+        _safe_alter(cur, 'categories', 'parent_id',
+                    'INTEGER REFERENCES categories(id) ON DELETE SET NULL')
+        _safe_alter(cur, 'categories', 'description', 'TEXT')
+
         # ── Folders ───────────────────────────────────────────────────────────
         cur.execute('''
             CREATE TABLE IF NOT EXISTS folders (
                 id             SERIAL PRIMARY KEY,
                 name           TEXT    NOT NULL UNIQUE,
-                parent_id      INTEGER REFERENCES folders(id),
+                parent_id      INTEGER REFERENCES folders(id) ON DELETE SET NULL,
                 premium        BOOLEAN DEFAULT FALSE,
                 admin_approval BOOLEAN DEFAULT FALSE,
                 download_count INTEGER DEFAULT 0
             )
         ''')
+
+        # ── Nested hierarchy migrations for folders ────────────────────────────
+        _safe_alter(cur, 'folders', 'description', 'TEXT')
+        _safe_alter(cur, 'folders', 'emoji', "TEXT DEFAULT '📁'")
+        _safe_alter(cur, 'folders', 'sort_order', 'INTEGER DEFAULT 0')
+        _safe_alter(cur, 'folders', 'created_at', 'TIMESTAMPTZ DEFAULT NOW()')
+        _safe_alter(cur, 'folders', 'updated_at', 'TIMESTAMPTZ DEFAULT NOW()')
 
         # ── Files ─────────────────────────────────────────────────────────────
         cur.execute('''
@@ -398,6 +410,44 @@ def initialize_database():
             'ON admin_activity_log(created_at DESC NULLS LAST)'
         )
 
+        # ── Phase 2: User favorites & download history ──────────────────────
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS user_favorites (
+                user_id   BIGINT  NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                folder_id INTEGER NOT NULL REFERENCES folders(id)    ON DELETE CASCADE,
+                added_at  TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (user_id, folder_id)
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS download_history (
+                id            SERIAL  PRIMARY KEY,
+                user_id       BIGINT  NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                folder_id     INTEGER NOT NULL REFERENCES folders(id)    ON DELETE CASCADE,
+                downloaded_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        ''')
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_user_favorites_user '
+            'ON user_favorites(user_id)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_download_history_user '
+            'ON download_history(user_id, downloaded_at DESC)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_folders_parent '
+            'ON folders(parent_id)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_categories_parent '
+            'ON categories(parent_id)'
+        )
+        cur.execute(
+            'CREATE INDEX IF NOT EXISTS idx_folders_sort_order '
+            'ON folders(sort_order)'
+        )
+
         # ── Phase 1 migrations: categories & search ───────────────────────────
         # Enable pg_trgm for fuzzy/similarity search (idempotent on Supabase)
         try:
@@ -577,19 +627,21 @@ def add_user_to_db(user_id: int, username: str = None, first_name: str = None):
 def search_folders(query: str, limit: int = 15):
     """
     Layered folder search: exact → prefix → full-text (tsvector) → fuzzy (trigram).
-    Returns list of (folder_id, name, file_count, premium, admin_approval, category_name).
-    Each layer is tried; first non-empty result wins.
+    Now searches ALL depth levels (no parent_id IS NULL filter).
+    Returns list of (folder_id, name, file_count, premium, admin_approval, category_name, path).
     """
     conn = get_connection()
+    # Build path as "Category > Parent > Name" for display in results
     _base = '''
         SELECT f.id, f.name,
                COUNT(fi.id) AS file_count,
                f.premium, f.admin_approval,
-               c.name AS category_name
+               COALESCE(c.name, 'Uncategorized') AS category_name,
+               COALESCE(c.name || ' > ', '') || f.name AS path
         FROM folders f
-        LEFT JOIN files fi     ON fi.folder_id = f.id
-        LEFT JOIN categories c ON c.id = f.category_id
-        WHERE f.parent_id IS NULL
+        LEFT JOIN files      fi ON fi.folder_id = f.id
+        LEFT JOIN categories c  ON c.id = f.category_id
+        WHERE TRUE
     '''
     try:
         cur = conn.cursor()
@@ -657,6 +709,267 @@ def search_folders(query: str, limit: int = 15):
         return []
     finally:
         _release(conn)
+
+
+# ── Hierarchy navigation helpers ────────────────────────────────────────────────
+
+def get_child_folders(parent_id=None, category_id=None):
+    """
+    Get immediate child folders of a parent_id, OR root folders in a category.
+    Returns list of (id, name, emoji, premium, admin_approval, file_count, has_children).
+    """
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        if parent_id is not None:
+            # Sub-folders of a folder
+            cur.execute("""
+                SELECT f.id, f.name, COALESCE(f.emoji, '📁'), f.premium, f.admin_approval,
+                       COUNT(fi.id) AS file_count,
+                       (SELECT COUNT(*) FROM folders sf WHERE sf.parent_id = f.id) > 0 AS has_children
+                FROM folders f
+                LEFT JOIN files fi ON fi.folder_id = f.id
+                WHERE f.parent_id = %s
+                GROUP BY f.id
+                ORDER BY COALESCE(f.sort_order, 0), f.name
+            """, (parent_id,))
+        elif category_id is not None:
+            if category_id == 0:
+                # Uncategorized — root folders with no category and no parent
+                cur.execute("""
+                    SELECT f.id, f.name, COALESCE(f.emoji, '📁'), f.premium, f.admin_approval,
+                           COUNT(fi.id) AS file_count,
+                           (SELECT COUNT(*) FROM folders sf WHERE sf.parent_id = f.id) > 0 AS has_children
+                    FROM folders f
+                    LEFT JOIN files fi ON fi.folder_id = f.id
+                    WHERE f.category_id IS NULL AND f.parent_id IS NULL
+                    GROUP BY f.id
+                    ORDER BY COALESCE(f.sort_order, 0), f.name
+                """)
+            else:
+                # Root folders in a specific category
+                cur.execute("""
+                    SELECT f.id, f.name, COALESCE(f.emoji, '📁'), f.premium, f.admin_approval,
+                           COUNT(fi.id) AS file_count,
+                           (SELECT COUNT(*) FROM folders sf WHERE sf.parent_id = f.id) > 0 AS has_children
+                    FROM folders f
+                    LEFT JOIN files fi ON fi.folder_id = f.id
+                    WHERE f.category_id = %s AND f.parent_id IS NULL
+                    GROUP BY f.id
+                    ORDER BY COALESCE(f.sort_order, 0), f.name
+                """, (category_id,))
+        return cur.fetchall()
+    finally:
+        _release(conn)
+
+
+def get_child_categories(parent_id=None):
+    """
+    Get immediate sub-categories of a parent category (or root categories if parent_id=None).
+    Returns list of (id, name, emoji, sort_order, folder_count, has_children).
+    """
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        if parent_id is None:
+            cur.execute("""
+                SELECT c.id, c.name, c.emoji, c.sort_order,
+                       COUNT(DISTINCT f.id) AS folder_count,
+                       (SELECT COUNT(*) FROM categories sc WHERE sc.parent_id = c.id) > 0 AS has_children
+                FROM categories c
+                LEFT JOIN folders f ON f.category_id = c.id AND f.parent_id IS NULL
+                WHERE c.parent_id IS NULL
+                GROUP BY c.id
+                ORDER BY c.sort_order, c.name
+            """)
+        else:
+            cur.execute("""
+                SELECT c.id, c.name, c.emoji, c.sort_order,
+                       COUNT(DISTINCT f.id) AS folder_count,
+                       (SELECT COUNT(*) FROM categories sc WHERE sc.parent_id = c.id) > 0 AS has_children
+                FROM categories c
+                LEFT JOIN folders f ON f.category_id = c.id AND f.parent_id IS NULL
+                WHERE c.parent_id = %s
+                GROUP BY c.id
+                ORDER BY c.sort_order, c.name
+            """, (parent_id,))
+        return cur.fetchall()
+    finally:
+        _release(conn)
+
+
+def get_folder_breadcrumb(folder_id: int) -> list:
+    """
+    Walk up parent_id chain for a folder.
+    Returns [(id, name, emoji), ...] root-first.
+    """
+    crumbs = []
+    seen = set()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        fid = folder_id
+        while fid and fid not in seen:
+            seen.add(fid)
+            cur.execute(
+                "SELECT id, name, COALESCE(emoji, '📁'), parent_id FROM folders WHERE id = %s",
+                (fid,)
+            )
+            row = cur.fetchone()
+            if not row:
+                break
+            crumbs.append((row[0], row[1], row[2]))
+            fid = row[3]  # parent_id
+        crumbs.reverse()
+        return crumbs
+    finally:
+        _release(conn)
+
+
+def get_category_breadcrumb(category_id: int) -> list:
+    """
+    Walk up parent_id chain for a category.
+    Returns [(id, name, emoji), ...] root-first.
+    """
+    crumbs = []
+    seen = set()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cid = category_id
+        while cid and cid not in seen:
+            seen.add(cid)
+            cur.execute(
+                "SELECT id, name, COALESCE(emoji, '📁'), parent_id FROM categories WHERE id = %s",
+                (cid,)
+            )
+            row = cur.fetchone()
+            if not row:
+                break
+            crumbs.append((row[0], row[1], row[2]))
+            cid = row[3]
+        crumbs.reverse()
+        return crumbs
+    finally:
+        _release(conn)
+
+
+def has_folder_cycle(folder_id: int, proposed_parent_id: int) -> bool:
+    """
+    Returns True if proposed_parent_id is a descendant of folder_id.
+    Prevents circular parent-child references when reparenting.
+    """
+    seen = set()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        current = proposed_parent_id
+        while current and current not in seen:
+            seen.add(current)
+            if current == folder_id:
+                return True
+            cur.execute("SELECT parent_id FROM folders WHERE id = %s", (current,))
+            row = cur.fetchone()
+            current = row[0] if row else None
+        return False
+    finally:
+        _release(conn)
+
+
+def get_subtree_file_count(folder_id: int) -> int:
+    """Recursively count all files in this folder and all descendant folders."""
+    row = db_fetchone("""
+        WITH RECURSIVE subtree AS (
+            SELECT id FROM folders WHERE id = %s
+            UNION ALL
+            SELECT f.id FROM folders f
+            JOIN subtree s ON f.parent_id = s.id
+        )
+        SELECT COUNT(*) FROM files WHERE folder_id IN (SELECT id FROM subtree)
+    """, (folder_id,))
+    return row[0] if row else 0
+
+
+def toggle_user_favorite(user_id: int, folder_id: int) -> bool:
+    """
+    Toggle a folder in/out of user's favorites.
+    Returns True if added, False if removed.
+    """
+    existing = db_fetchone(
+        "SELECT 1 FROM user_favorites WHERE user_id = %s AND folder_id = %s",
+        (user_id, folder_id)
+    )
+    if existing:
+        db_execute(
+            "DELETE FROM user_favorites WHERE user_id = %s AND folder_id = %s",
+            (user_id, folder_id)
+        )
+        return False
+    else:
+        db_execute(
+            "INSERT INTO user_favorites (user_id, folder_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (user_id, folder_id)
+        )
+        return True
+
+
+def get_user_favorites(user_id: int):
+    """Get user's bookmarked folders. Returns (id, name, emoji, file_count, has_children)."""
+    return db_fetchall("""
+        SELECT f.id, f.name, COALESCE(f.emoji, '📁'),
+               COUNT(fi.id) AS file_count,
+               (SELECT COUNT(*) FROM folders sf WHERE sf.parent_id = f.id) > 0 AS has_children
+        FROM user_favorites uf
+        JOIN folders f ON f.id = uf.folder_id
+        LEFT JOIN files fi ON fi.folder_id = f.id
+        WHERE uf.user_id = %s
+        GROUP BY f.id
+        ORDER BY uf.added_at DESC
+    """, (user_id,))
+
+
+def record_download_history(user_id: int, folder_id: int):
+    """Record a folder download in history (keep last 50 per user)."""
+    db_execute(
+        "INSERT INTO download_history (user_id, folder_id) VALUES (%s, %s)",
+        (user_id, folder_id)
+    )
+    # Prune to 50 most recent per user
+    db_execute("""
+        DELETE FROM download_history
+        WHERE id IN (
+            SELECT id FROM download_history
+            WHERE user_id = %s
+            ORDER BY downloaded_at DESC
+            OFFSET 50
+        )
+    """, (user_id,))
+
+
+def get_recent_downloads(user_id: int, limit: int = 10):
+    """Get recently downloaded folders for a user. Returns (id, name, emoji, downloaded_at)."""
+    return db_fetchall("""
+        SELECT DISTINCT ON (f.id) f.id, f.name, COALESCE(f.emoji, '📁'), dh.downloaded_at
+        FROM download_history dh
+        JOIN folders f ON f.id = dh.folder_id
+        WHERE dh.user_id = %s
+        ORDER BY f.id, dh.downloaded_at DESC
+        LIMIT %s
+    """, (user_id, limit))
+
+
+def get_recently_added_folders(limit: int = 5):
+    """Get the most recently created folders (for What's New section)."""
+    return db_fetchall("""
+        SELECT f.id, f.name, COALESCE(f.emoji, '📁'), f.created_at,
+               COUNT(fi.id) AS file_count
+        FROM folders f
+        LEFT JOIN files fi ON fi.folder_id = f.id
+        WHERE f.created_at IS NOT NULL
+        GROUP BY f.id
+        ORDER BY f.created_at DESC
+        LIMIT %s
+    """, (limit,))
 
 
 # ── Catalog config helpers ─────────────────────────────────────────────────────

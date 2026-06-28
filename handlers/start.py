@@ -9,7 +9,14 @@ from aiogram import types
 from aiogram.types import InlineKeyboardMarkup
 from utils.keyboard import IKB as InlineKeyboardButton
 from middlewares.authorization import is_private_chat, is_user_member, get_channel_title, invalidate_member_cache
-from utils.database import add_user_to_db, db_fetchone, db_execute, db_fetchall
+from utils.database import (
+    add_user_to_db, db_fetchone, db_execute, db_fetchall,
+    get_child_folders, get_child_categories,
+    get_folder_breadcrumb, get_category_breadcrumb,
+    get_subtree_file_count, toggle_user_favorite,
+    get_user_favorites, get_recent_downloads, get_recently_added_folders,
+    record_download_history
+)
 from utils.helpers import notify_admins, esc
 from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, ADMIN_CONTACT, PAYMENT_MODE, BOT_NAME
 from datetime import datetime, timedelta
@@ -179,6 +186,13 @@ async def send_ui(chat_id: int, message_id: int = None,
 
         if not is_premium_user:
             keyboard.row(InlineKeyboardButton("⭐ Get Premium", callback_data="info_premium"))
+
+        # New UX features row
+        keyboard.row(
+            InlineKeyboardButton("⭐ Favorites",    callback_data="fav_list"),
+            InlineKeyboardButton("📥 Recent",      callback_data="hist_list"),
+            InlineKeyboardButton("🆕 New",          callback_data="new_list"),
+        )
 
         keyboard.row(
             InlineKeyboardButton("📖 About Us", callback_data="info_about"),
@@ -373,15 +387,9 @@ async def _cb_category_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
 
     await cq.answer()
     await send_ui(user_id, cq.message.message_id, is_returning=True)
-
-
 async def _cb_search(cq: types.CallbackQuery, bot, user_id: int) -> None:
     """search — show the search prompt. The search router handles the FSM state."""
     await cq.answer()
-    # The search router's own callback handler registered on 'search' callback_data
-    # will catch this. However since our dispatch table catches it first, we
-    # manually delegate to the search handler's cb_search using a workaround:
-    # edit the message to the search prompt and the FSM is set by the search router.
     try:
         from utils.keyboard import InlineBuilder, IKB as IBtn
         kb = InlineBuilder()
@@ -399,10 +407,6 @@ async def _cb_search(cq: types.CallbackQuery, bot, user_id: int) -> None:
             parse_mode=ParseMode.HTML,
             reply_markup=kb.build(),
         )
-        # Set FSM state via the search module
-        # NOTE: FSM state is set by a dedicated callback registered in search.py
-        # This edit triggers the message change; the search.py router will handle
-        # the next text message via its FSM state registration.
     except TelegramBadRequest:
         pass
 
@@ -430,17 +434,6 @@ async def _cb_catalog(cq: types.CallbackQuery, bot, user_id: int) -> None:
                         "Browse all available folders organized by category.\n"
                         "Click any folder link to open the bot and start downloading!\n\n"
                         f"<i>🔗 {url}</i>"
-                    ),
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=kb.build(),
-                )
-            except TelegramBadRequest:
-                pass
-        else:
-            await cq.answer("Catalog not available yet. Try /catalog command.", show_alert=True)
-    except Exception as e:
-        log.error(f"Catalog callback error: {e}")
-        await cq.answer("Could not load catalog. Try again later.", show_alert=True)
 
 
 async def _cb_download(cq: types.CallbackQuery, bot, user_id: int) -> None:
@@ -986,6 +979,13 @@ _CB_HANDLERS = {
     "info_status":  _cb_info_status,
     "close_info":   _cb_back_to_main,
     "back_to_main": _cb_back_to_main,
+    # ── Hierarchical nav ──────────────────────────
+    "nav":          _cb_navigate,        # nav:c:<id>:<page> or nav:f:<id>:<page>
+    "fi":           _cb_file_preview,    # fi:<folder_id>:<page>
+    "fav":          _cb_toggle_favorite, # fav:<folder_id>  (toggle bookmark)
+    "fav_list":     _cb_fav_list,        # fav_list  (show favorites)
+    "hist_list":    _cb_hist_list,       # hist_list (recent downloads)
+    "new_list":     _cb_new_list,        # new_list  (recently added)
 }
 
 
