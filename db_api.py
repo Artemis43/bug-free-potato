@@ -1225,11 +1225,11 @@ def main():
             # Fetch all folders with counts
             folders_raw = db.db_fetchall("""
                 SELECT f.id, f.name, COALESCE(f.emoji,'📁'), f.parent_id, f.category_id,
-                       f.premium, f.admin_approval, f.download_count,
+                       f.premium, f.admin_approval, f.download_count, f.sort_order,
                        COUNT(fi.id) AS file_count
                 FROM folders f
                 LEFT JOIN files fi ON fi.folder_id = f.id
-                GROUP BY f.id
+                GROUP BY f.id, f.sort_order
                 ORDER BY COALESCE(f.sort_order,0), f.name
             """)
             cats = [
@@ -1241,12 +1241,20 @@ def main():
                     "id": r[0], "name": r[1], "emoji": r[2],
                     "parent_id": r[3], "category_id": r[4],
                     "premium": r[5], "admin_approval": r[6],
-                    "download_count": r[7], "file_count": r[8],
+                    "download_count": r[7], "sort_order": r[8], "file_count": r[9],
                     "type": "premium" if r[5] else ("paid" if r[6] else "free"),
                 }
                 for r in (folders_raw or [])
             ]
             print(json.dumps({"ok": True, "data": {"categories": cats, "folders": folders}}, cls=DateTimeEncoder))
+
+        elif action == "reorder":
+            node_type = params["type"] # "category" or "folder"
+            ids = params["ids"] # list of integer IDs
+            table = "categories" if node_type == "category" else "folders"
+            for index, node_id in enumerate(ids):
+                db.db_execute(f"UPDATE {table} SET sort_order = %s WHERE id = %s", (index, int(node_id)))
+            print(json.dumps({"ok": True}))
 
         elif action == "folder_create":
             """Create a new folder node from the dashboard (virtual, for content organisation)."""
@@ -1307,6 +1315,80 @@ def main():
                 print(json.dumps({"ok": True}))
             else:
                 print(json.dumps({"ok": False, "error": f"Unknown node type: {node_type}"}))
+
+        elif action == "tg_bridge_status":
+            import utils.tg_bridge as bridge
+            print(json.dumps({"ok": True, "data": bridge.get_connection_status()}))
+
+        elif action == "tg_bridge_send_code":
+            import utils.tg_bridge as bridge
+            api_id = int(params["api_id"])
+            api_hash = params["api_hash"].strip()
+            phone = params["phone"].strip()
+            res = bridge.send_code(api_id, api_hash, phone)
+            print(json.dumps(res))
+
+        elif action == "tg_bridge_login":
+            import utils.tg_bridge as bridge
+            code = params["code"].strip()
+            password = params.get("password")
+            if password:
+                password = password.strip()
+            res = bridge.login(code, password)
+            print(json.dumps(res))
+
+        elif action == "tg_bridge_logout":
+            import utils.tg_bridge as bridge
+            res = bridge.logout()
+            print(json.dumps(res))
+
+        elif action == "tg_bridge_chats":
+            import utils.tg_bridge as bridge
+            query = params.get("query")
+            res = bridge.get_chats(query)
+            print(json.dumps(res))
+
+        elif action == "tg_bridge_messages":
+            import utils.tg_bridge as bridge
+            chat_id = int(params["chat_id"])
+            limit = int(params.get("limit", 50))
+            res = bridge.get_messages(chat_id, limit)
+            print(json.dumps(res))
+
+        elif action == "tg_bridge_forward":
+            import utils.tg_bridge as bridge
+            chat_id = int(params["chat_id"])
+            message_ids = [int(x) for x in params["message_ids"]]
+            bot_username = get_bot_username()
+            res = bridge.forward_messages(chat_id, message_ids, bot_username)
+            print(json.dumps(res))
+
+        elif action == "set_active_upload_folder":
+            user_id = int(params["user_id"])
+            folder_id = params.get("folder_id")
+            if folder_id is not None and folder_id != "":
+                folder_id = int(folder_id)
+            else:
+                folder_id = None
+            db.db_execute("UPDATE users SET current_upload_folder_id = %s WHERE user_id = %s", (folder_id, user_id))
+            print(json.dumps({"ok": True}))
+
+        elif action == "channel_create":
+            chat_id = params["chat_id"].strip()
+            title = params.get("title", "").strip() or chat_id
+            db.db_execute("INSERT INTO storage_channels (chat_id, title) VALUES (%s, %s)", (chat_id, title))
+            print(json.dumps({"ok": True}))
+
+        elif action == "channel_update":
+            ch_id = int(params["id"])
+            active = bool(params["active"])
+            db.db_execute("UPDATE storage_channels SET active = %s WHERE id = %s", (active, ch_id))
+            print(json.dumps({"ok": True}))
+
+        elif action == "channel_delete":
+            ch_id = int(params["id"])
+            db.db_execute("DELETE FROM storage_channels WHERE id = %s", (ch_id,))
+            print(json.dumps({"ok": True}))
 
         else:
             print(json.dumps({"ok": False, "error": f"Unknown action: {action}"}))

@@ -65,3 +65,7 @@ htmlcov/
 .tox/
 .mypy_cache/
 sticker_id_bot.py
+
+# ── Telegram / Telethon Sessions ──────────────────────────────────────────────
+*.session
+*.session-journal

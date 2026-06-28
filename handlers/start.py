@@ -422,9 +422,11 @@ async def _cb_catalog(cq: types.CallbackQuery, bot, user_id: int) -> None:
             url = await generate_catalog(me.username)
 
         if url:
+            from utils.keyboard import InlineBuilder, IKB as IBtn
+            from aiogram.enums import ParseMode
             kb = InlineBuilder()
-            kb.row(InlineKeyboardButton("📖 Open Catalog", url=url))
-            kb.row(InlineKeyboardButton("🔙 Back to Menu", callback_data="cat_main"))
+            kb.row(IBtn("📖 Open Catalog", url=url))
+            kb.row(IBtn("🔙 Back to Menu", callback_data="cat_main"))
             try:
                 await bot.edit_message_text(
                     chat_id=cq.message.chat.id,
@@ -434,6 +436,15 @@ async def _cb_catalog(cq: types.CallbackQuery, bot, user_id: int) -> None:
                         "Browse all available folders organized by category.\n"
                         "Click any folder link to open the bot and start downloading!\n\n"
                         f"<i>🔗 {url}</i>"
+                    ),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=kb.build(),
+                )
+            except TelegramBadRequest:
+                pass
+    except Exception as e:
+        logging.error(f"Catalog callback error: {e}", exc_info=True)
+        await cq.answer("Error displaying catalog.")
 
 
 async def _cb_download(cq: types.CallbackQuery, bot, user_id: int) -> None:
@@ -947,8 +958,371 @@ async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
                 )
             except Exception:
                 pass
-        else:
             await send_ui(user_id, message_id=cq.message.message_id, is_returning=True)
+
+
+async def send_hierarchy_ui(chat_id: int, node_type: str, node_id: int, message_id: int = None, page: int = 0):
+    bot = get_bot()
+    user_data = db_fetchone('SELECT premium FROM users WHERE user_id = %s', (chat_id,))
+    is_premium_user = bool(user_data and user_data[0])
+
+    keyboard = InlineBuilder()
+    
+    if node_type == 'c':
+        # Category navigation
+        if node_id == 0:
+            cat_name = "Uncategorized"
+            cat_emoji = "📦"
+            crumbs_text = "📦 Uncategorized"
+            parent_id = None
+        else:
+            cat_row = db_fetchone("SELECT name, emoji, parent_id FROM categories WHERE id = %s", (node_id,))
+            if not cat_row:
+                await send_ui(chat_id, message_id)
+                return
+            cat_name, cat_emoji, parent_id = cat_row
+            crumbs = get_category_breadcrumb(node_id)
+            crumbs_text = " ➔ ".join(f"{emoji} {name}" for cid, name, emoji in crumbs)
+
+        # Fetch children: sub-categories first, then folders
+        sub_cats = get_child_categories(node_id if node_id > 0 else None)
+        folders = get_child_folders(category_id=node_id)
+        
+        # Combine lists for pagination
+        items = []
+        for cid, name, emoji, sort_order, folder_count, has_children in sub_cats:
+            items.append(('c', cid, name, emoji, folder_count, has_children, False, False))
+        for fid, name, emoji, premium, admin_approval, file_count, has_children in folders:
+            items.append(('f', fid, name, emoji, file_count, has_children, premium, admin_approval))
+            
+        total_pages = max(1, (len(items) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+        page = max(0, min(page, total_pages - 1))
+        page_items = items[page * _PAGE_SIZE : (page + 1) * _PAGE_SIZE]
+        
+        text = (
+            f"<b>📂 Navigation Path:</b>\n"
+            f"📍 <code>{esc(crumbs_text)}</code>\n\n"
+            f"Select a category or folder below to browse (page {page + 1}/{total_pages}):\n\n"
+        )
+        
+        for item_type, iid, name, emoji, count, has_children, premium, admin_approval in page_items:
+            if item_type == 'c':
+                text += f"• 📂 <code>{esc(name)}</code> — <i>{count} folder{'s' if count != 1 else ''}</i>\n"
+                keyboard.row(InlineKeyboardButton(f"📂 {name}", callback_data=f"nav:c:{iid}:0"))
+            else:
+                safe_name = esc(name)
+                if not is_premium_user and premium:
+                    tag, btn_icon = " [⭐ Premium]", "⭐"
+                elif admin_approval:
+                    tag, btn_icon = " [💰 Paid]", "💰"
+                else:
+                    tag, btn_icon = "", "📁"
+                text += f"• {btn_icon} <code>{safe_name}</code>{tag} — <i>{count} file{'s' if count != 1 else ''}</i>\n"
+                
+                if has_children:
+                    callback_data = f"nav:f:{iid}:0"
+                else:
+                    callback_data = f"fi:{iid}:0"
+                keyboard.row(InlineKeyboardButton(f"{btn_icon} {name}", callback_data=callback_data))
+                
+        # Pagination row
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton(f"◀️ Page {page}", callback_data=f"nav:c:{node_id}:{page - 1}"))
+        if page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton(f"Page {page + 2} ▶️", callback_data=f"nav:c:{node_id}:{page + 1}"))
+        if nav_buttons:
+            keyboard.row(*nav_buttons)
+            
+        # Back button
+        if node_id > 0:
+            parent_id_val = parent_id if parent_id else 0
+            keyboard.row(InlineKeyboardButton("🔙 Back / Up One Level", callback_data=f"nav:c:{parent_id_val}:0"))
+        else:
+            keyboard.row(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="cat_main"))
+
+    elif node_type == 'f':
+        # Folder navigation (sub-folders)
+        folder_row = db_fetchone("SELECT name, emoji, category_id, parent_id FROM folders WHERE id = %s", (node_id,))
+        if not folder_row:
+            await send_ui(chat_id, message_id)
+            return
+        folder_name, folder_emoji, category_id, parent_id = folder_row
+        crumbs = get_folder_breadcrumb(node_id)
+        crumbs_text = " ➔ ".join(f"{emoji} {name}" for fid, name, emoji in crumbs)
+        
+        sub_folders = get_child_folders(parent_id=node_id)
+        
+        total_pages = max(1, (len(sub_folders) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+        page = max(0, min(page, total_pages - 1))
+        page_folders = sub_folders[page * _PAGE_SIZE : (page + 1) * _PAGE_SIZE]
+        
+        text = (
+            f"<b>📁 Folder Contents:</b>\n"
+            f"📍 <code>{esc(crumbs_text)}</code>\n\n"
+            f"Browse sub-folders (page {page + 1}/{total_pages}):\n\n"
+        )
+        
+        for fid, name, emoji, premium, admin_approval, file_count, has_children in page_folders:
+            safe_name = esc(name)
+            if not is_premium_user and premium:
+                tag, btn_icon = " [⭐ Premium]", "⭐"
+            elif admin_approval:
+                tag, btn_icon = " [💰 Paid]", "💰"
+            else:
+                tag, btn_icon = "", "📁"
+            text += f"• {btn_icon} <code>{safe_name}</code>{tag} — <i>{file_count} file{'s' if file_count != 1 else ''}</i>\n"
+            
+            if has_children:
+                callback_data = f"nav:f:{fid}:0"
+            else:
+                callback_data = f"fi:{fid}:0"
+            keyboard.row(InlineKeyboardButton(f"{btn_icon} {name}", callback_data=callback_data))
+            
+        # Pagination row
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton(f"◀️ Page {page}", callback_data=f"nav:f:{node_id}:{page - 1}"))
+        if page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton(f"Page {page + 2} ▶️", callback_data=f"nav:f:{node_id}:{page + 1}"))
+        if nav_buttons:
+            keyboard.row(*nav_buttons)
+            
+        # Action buttons
+        is_fav = db_fetchone("SELECT 1 FROM user_favorites WHERE user_id = %s AND folder_id = %s", (chat_id, node_id))
+        fav_label = "⭐ Remove Favorite" if is_fav else "⭐ Add Favorite"
+        keyboard.row(
+            InlineKeyboardButton("📥 Download All", callback_data=f"dl:{node_id}"),
+            InlineKeyboardButton(fav_label, callback_data=f"fav:{node_id}")
+        )
+        
+        if parent_id is not None:
+            keyboard.row(InlineKeyboardButton("🔙 Up One Level", callback_data=f"nav:f:{parent_id}:0"))
+        elif category_id is not None:
+            keyboard.row(InlineKeyboardButton("🔙 Up One Level", callback_data=f"nav:c:{category_id}:0"))
+        else:
+            keyboard.row(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="cat_main"))
+
+    try:
+        if message_id:
+            await bot.edit_message_text(
+                chat_id=chat_id, message_id=message_id,
+                text=text, reply_markup=keyboard.build(), parse_mode=ParseMode.HTML
+            )
+        else:
+            await bot.send_message(
+                chat_id, text, reply_markup=keyboard.build(), parse_mode=ParseMode.HTML
+            )
+    except TelegramBadRequest:
+        pass
+
+
+async def _cb_navigate(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    try:
+        _, nav_type, node_id_str, page_str = cq.data.split(':', 3)
+        node_id = int(node_id_str)
+        page = int(page_str)
+    except (ValueError, IndexError):
+        await cq.answer("Invalid navigation path.")
+        return
+    await cq.answer()
+    await send_hierarchy_ui(user_id, nav_type, node_id, cq.message.message_id, page)
+
+
+async def _cb_file_preview(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    try:
+        _, folder_id_str, page_str = cq.data.split(':', 2)
+        folder_id = int(folder_id_str)
+        page = int(page_str)
+    except (ValueError, IndexError):
+        await cq.answer("Invalid folder selection.")
+        return
+        
+    await cq.answer()
+    
+    folder_row = db_fetchone("SELECT name, emoji, category_id, parent_id FROM folders WHERE id = %s", (folder_id,))
+    if not folder_row:
+        await send_ui(user_id, cq.message.message_id)
+        return
+    folder_name, folder_emoji, category_id, parent_id = folder_row
+    
+    files = db_fetchall("SELECT id, file_name, file_type FROM files WHERE folder_id = %s ORDER BY id", (folder_id,))
+    
+    PAGE_SIZE_FILES = 8
+    total_pages = max(1, (len(files) + PAGE_SIZE_FILES - 1) // PAGE_SIZE_FILES)
+    page = max(0, min(page, total_pages - 1))
+    page_files = files[page * PAGE_SIZE_FILES : (page + 1) * PAGE_SIZE_FILES]
+    
+    text = (
+        f"<b>📁 File Preview:</b>\n"
+        f"📂 Folder: <code>{esc(folder_name)}</code>\n"
+        f"Total Files: {len(files)}\n\n"
+        f"Select a file to download/copy, or select Download All below:\n\n"
+    )
+    
+    keyboard = InlineBuilder()
+    for fid, fname, ftype in page_files:
+        text += f"• 📄 <code>{esc(fname)}</code>\n"
+        keyboard.row(InlineKeyboardButton(f"📄 {fname}", callback_data=f"dl_file:{fid}:{folder_id}:{page}"))
+        
+    # Pagination
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(f"◀️ Prev", callback_data=f"fi:{folder_id}:{page - 1}"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(f"Next ▶️", callback_data=f"fi:{folder_id}:{page + 1}"))
+    if nav_buttons:
+        keyboard.row(*nav_buttons)
+        
+    # Actions
+    keyboard.row(
+        InlineKeyboardButton("📥 Download All", callback_data=f"dl:{folder_id}"),
+        InlineKeyboardButton("🔙 Back to Folder", callback_data=f"nav:f:{folder_id}:0")
+    )
+    
+    try:
+        await bot.edit_message_text(
+            chat_id=user_id, message_id=cq.message.message_id,
+            text=text, reply_markup=keyboard.build(), parse_mode=ParseMode.HTML
+        )
+    except TelegramBadRequest:
+        pass
+
+
+async def _cb_download_file(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    try:
+        _, file_id_str, folder_id_str, page_str = cq.data.split(':', 3)
+        file_id = int(file_id_str)
+        folder_id = int(folder_id_str)
+        page = int(page_str)
+    except (ValueError, IndexError):
+        await cq.answer("Invalid file selection.")
+        return
+
+    await cq.answer("Delivering file...")
+    
+    try:
+        from utils.bots import get_current_bot_pk, get_servable_locations
+        from handlers.download import _deliver_file
+        me = await bot.me()
+        bot_pk = get_current_bot_pk(me.username)
+        locations = get_servable_locations(file_id, bot_pk) if bot_pk else []
+        sent, user_blocked = await _deliver_file(bot, user_id, locations)
+        if user_blocked:
+            return
+        if sent is None:
+            await cq.answer("File is currently unavailable.", show_alert=True)
+        else:
+            await cq.answer("File delivered successfully!", show_alert=False)
+    except Exception as e:
+        logging.error(f"Single file delivery error: {e}", exc_info=True)
+        await cq.answer("Error delivering file.")
+
+
+async def _cb_toggle_favorite(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    try:
+        _, folder_id_str = cq.data.split(':', 1)
+        folder_id = int(folder_id_str)
+    except (ValueError, IndexError):
+        await cq.answer("Invalid folder ID.")
+        return
+        
+    added = toggle_user_favorite(user_id, folder_id)
+    status_msg = "Added to Favorites! ⭐" if added else "Removed from Favorites. 📥"
+    await cq.answer(status_msg)
+    
+    await send_hierarchy_ui(user_id, 'f', folder_id, cq.message.message_id, 0)
+
+
+async def _cb_fav_list(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    await cq.answer()
+    
+    favs = get_user_favorites(user_id)
+    
+    text = "⭐ <b>Your Favorites:</b>\n\n"
+    keyboard = InlineBuilder()
+    
+    if not favs:
+        text += "You haven't bookmarked any folders yet.\n"
+        text += "Tap the <b>⭐ Add Favorite</b> button on any folder page to save it here!"
+    else:
+        for fid, name, emoji, file_count, has_children in favs:
+            text += f"• {emoji} <code>{esc(name)}</code> — <i>{file_count} file{'s' if file_count != 1 else ''}</i>\n"
+            callback_data = f"nav:f:{fid}:0" if has_children else f"fi:{fid}:0"
+            keyboard.row(InlineKeyboardButton(f"{emoji} {name}", callback_data=callback_data))
+            
+    keyboard.row(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="cat_main"))
+    
+    try:
+        await bot.edit_message_text(
+            chat_id=user_id,
+            message_id=cq.message.message_id,
+            text=text,
+            reply_markup=keyboard.build(),
+            parse_mode=ParseMode.HTML
+        )
+    except TelegramBadRequest:
+        pass
+
+
+async def _cb_hist_list(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    await cq.answer()
+    
+    history = get_recent_downloads(user_id)
+    
+    text = "📥 <b>Recent Downloads:</b>\n\n"
+    keyboard = InlineBuilder()
+    
+    if not history:
+        text += "No recent downloads recorded yet."
+    else:
+        for fid, name, emoji, downloaded_at in history:
+            ts = downloaded_at.strftime("%d/%m/%Y") if downloaded_at else ""
+            text += f"• {emoji} <code>{esc(name)}</code> — <i>Downloaded on {ts}</i>\n"
+            keyboard.row(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"fi:{fid}:0"))
+            
+    keyboard.row(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="cat_main"))
+    
+    try:
+        await bot.edit_message_text(
+            chat_id=user_id,
+            message_id=cq.message.message_id,
+            text=text,
+            reply_markup=keyboard.build(),
+            parse_mode=ParseMode.HTML
+        )
+    except TelegramBadRequest:
+        pass
+
+
+async def _cb_new_list(cq: types.CallbackQuery, bot, user_id: int) -> None:
+    await cq.answer()
+    
+    new_folders = get_recently_added_folders(5)
+    
+    text = "🆕 <b>What's New (Recently Added):</b>\n\n"
+    keyboard = InlineBuilder()
+    
+    if not new_folders:
+        text += "No folders added recently."
+    else:
+        for fid, name, emoji, created_at, file_count in new_folders:
+            ts = created_at.strftime("%d/%m/%Y") if created_at else ""
+            text += f"• {emoji} <code>{esc(name)}</code> — <i>{file_count} files (Added {ts})</i>\n"
+            keyboard.row(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"fi:{fid}:0"))
+            
+    keyboard.row(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="cat_main"))
+    
+    try:
+        await bot.edit_message_text(
+            chat_id=user_id,
+            message_id=cq.message.message_id,
+            text=text,
+            reply_markup=keyboard.build(),
+            parse_mode=ParseMode.HTML
+        )
+    except TelegramBadRequest:
+        pass
 
 
 # ── Dispatch table — split on ':' gives the key for both prefix and exact data
@@ -959,6 +1333,7 @@ _CB_HANDLERS = {
     "search":       _cb_search,
     "catalog":      _cb_catalog,
     "dl":           _cb_download,
+    "dl_file":      _cb_download_file,
     "approve":      _cb_approve,
     "reject":       _cb_reject,
     "papprove":     _cb_folder_approve,
