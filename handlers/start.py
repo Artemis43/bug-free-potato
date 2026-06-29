@@ -98,9 +98,11 @@ async def send_ui(chat_id: int, message_id: int = None,
 
     # ── Fetch categories ──────────────────────────────────────────────────────
     categories = db_fetchall("""
-        SELECT c.id, c.name, c.emoji, COUNT(f.id) AS folder_count
+        SELECT c.id, c.name, c.emoji,
+               (SELECT COUNT(*) FROM folders f WHERE f.category_id = c.id AND f.parent_id IS NULL) AS folder_count,
+               (SELECT COUNT(*) FROM categories sc WHERE sc.parent_id = c.id) AS subcat_count
         FROM categories c
-        LEFT JOIN folders f ON f.category_id = c.id AND f.parent_id IS NULL
+        WHERE c.parent_id IS NULL
         GROUP BY c.id
         ORDER BY c.sort_order, c.name
     """)
@@ -138,8 +140,14 @@ async def send_ui(chat_id: int, message_id: int = None,
     else:
         text += "📚 <b>Browse by Category:</b>\n\n"
 
-        for cat_id, cat_name, emoji, folder_count in categories:
-            text += f"  {emoji} <b>{esc(cat_name)}</b> ({folder_count} folder{'s' if folder_count != 1 else ''})\n"
+        for cat_id, cat_name, emoji, folder_count, subcat_count in categories:
+            parts = []
+            if subcat_count > 0:
+                parts.append(f"{subcat_count} sub-categor{'ies' if subcat_count != 1 else 'y'}")
+            if folder_count > 0 or not parts:
+                parts.append(f"{folder_count} folder{'s' if folder_count != 1 else ''}")
+            desc = " & ".join(parts)
+            text += f"  {emoji} <b>{esc(cat_name)}</b> ({desc})\n"
 
         if uncat_count > 0:
             text += f"  📦 <b>Uncategorized</b> ({uncat_count} folder{'s' if uncat_count != 1 else ''})\n"
@@ -152,16 +160,22 @@ async def send_ui(chat_id: int, message_id: int = None,
         text += "\n"
 
         # Category buttons (one per row)
-        for cat_id, cat_name, emoji, folder_count in categories:
-            label = f"{emoji} {cat_name} ({folder_count})"
+        for cat_id, cat_name, emoji, folder_count, subcat_count in categories:
+            parts = []
+            if subcat_count > 0:
+                parts.append(f"{subcat_count} sub")
+            if folder_count > 0 or not parts:
+                parts.append(f"{folder_count} fld")
+            desc = "+".join(parts)
+            label = f"{emoji} {cat_name} ({desc})"
             if len(label) > 36:
                 label = label[:33] + "…"
-            keyboard.row(InlineKeyboardButton(label, callback_data=f"cat:{cat_id}:0"))
+            keyboard.row(InlineKeyboardButton(label, callback_data=f"nav:c:{cat_id}:0"))
 
         if uncat_count > 0:
             keyboard.row(InlineKeyboardButton(
                 f"📦 Uncategorized ({uncat_count})",
-                callback_data="cat:0:0"  # category_id=0 means uncategorized
+                callback_data="nav:c:0:0"  # category_id=0 means uncategorized
             ))
 
         # Utility buttons
@@ -985,7 +999,7 @@ async def send_hierarchy_ui(chat_id: int, node_type: str, node_id: int, message_
             crumbs_text = " ➔ ".join(f"{emoji} {name}" for cid, name, emoji in crumbs)
 
         # Fetch children: sub-categories first, then folders
-        sub_cats = get_child_categories(node_id if node_id > 0 else None)
+        sub_cats = get_child_categories(node_id) if node_id > 0 else []
         folders = get_child_folders(category_id=node_id)
         
         # Combine lists for pagination
@@ -1036,8 +1050,10 @@ async def send_hierarchy_ui(chat_id: int, node_type: str, node_id: int, message_
             
         # Back button
         if node_id > 0:
-            parent_id_val = parent_id if parent_id else 0
-            keyboard.row(InlineKeyboardButton("🔙 Back / Up One Level", callback_data=f"nav:c:{parent_id_val}:0"))
+            if parent_id is not None:
+                keyboard.row(InlineKeyboardButton("🔙 Back / Up One Level", callback_data=f"nav:c:{parent_id}:0"))
+            else:
+                keyboard.row(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="cat_main"))
         else:
             keyboard.row(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="cat_main"))
 

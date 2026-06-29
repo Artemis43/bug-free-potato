@@ -923,7 +923,7 @@ def get_user_favorites(user_id: int):
         JOIN folders f ON f.id = uf.folder_id
         LEFT JOIN files fi ON fi.folder_id = f.id
         WHERE uf.user_id = %s
-        GROUP BY f.id
+        GROUP BY f.id, uf.added_at
         ORDER BY uf.added_at DESC
     """, (user_id,))
 

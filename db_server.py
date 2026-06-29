@@ -90,6 +90,9 @@ def dispatch(action: str, params: dict) -> dict:
             old_env[k] = os.environ.get(k)
             os.environ[k] = v
 
+        import importlib
+        importlib.reload(db_api)
+
         sys.argv   = ['db_api.py', action, encoded]
         sys.stdout = buf
         db_api.main()
@@ -179,7 +182,7 @@ class ApiHandler(BaseHTTPRequestHandler):
 
 
 # ── Server startup ─────────────────────────────────────────────────────────────
-def run(host: str = '127.0.0.1', port: int = 5055):
+def run(host: str = '127.0.0.1', port: int = 5056):
     server = HTTPServer((host, port), ApiHandler)
     log.info(f"db_server running at http://{host}:{port}")
     log.info("Press Ctrl+C to stop.")
@@ -193,6 +196,6 @@ def run(host: str = '127.0.0.1', port: int = 5055):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Potato Bot DB API Server')
     parser.add_argument('--host', default='127.0.0.1')
-    parser.add_argument('--port', type=int, default=5055)
+    parser.add_argument('--port', type=int, default=5056)
     args = parser.parse_args()
     run(args.host, args.port)

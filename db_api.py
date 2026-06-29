@@ -22,6 +22,21 @@ def send_telegram_msg(user_id, text):
     except Exception as e:
         sys.stderr.write(f"Telegram notification error: {str(e)}\n")
 
+def delete_telegram_msg(chat_id, message_id):
+    try:
+        from config import API_TOKEN
+        if not API_TOKEN:
+            return
+        url = f"https://api.telegram.org/bot{API_TOKEN}/deleteMessage"
+        data = urllib.parse.urlencode({
+            'chat_id': chat_id,
+            'message_id': message_id
+        }).encode('utf-8')
+        req = urllib.request.Request(url, data=data)
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        sys.stderr.write(f"Telegram deletion error: {str(e)}\n")
+
 def get_bot_username():
     try:
         from config import API_TOKEN
@@ -154,9 +169,10 @@ def get_stats():
 
 def get_stats_fast():
     """Consolidated stats in a single CTE query — replaces 10 sequential SELECTs."""
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone, timedelta
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_ago = now - timedelta(days=7)
 
     row = db.db_fetchone("""
         WITH user_stats AS (
@@ -164,7 +180,8 @@ def get_stats_fast():
                 COUNT(*) AS total,
                 COUNT(*) FILTER (WHERE premium = TRUE)                          AS premium,
                 COUNT(*) FILTER (WHERE created_at >= %s)                        AS today,
-                COUNT(*) FILTER (WHERE status = 'pending')                      AS pending
+                COUNT(*) FILTER (WHERE status = 'pending')                      AS pending,
+                COUNT(*) FILTER (WHERE created_at >= %s)                        AS week
             FROM users
         ),
         folder_stats AS (
@@ -189,12 +206,40 @@ def get_stats_fast():
             f.total, f.free, f.prem, f.paid, f.downloads,
             c.total,
             fi.total,
-            r.inr_paise, r.stars
+            r.inr_paise, r.stars,
+            u.week
         FROM user_stats u, folder_stats f, cat_stats c, file_stats fi, rev_stats r
-    """, (today_start,))
+    """, (today_start, week_ago))
 
     if not row:
         return {}
+
+    # Top 5 most downloaded folders
+    top_folders_rows = db.db_fetchall(
+        "SELECT name, download_count FROM folders ORDER BY download_count DESC LIMIT 5"
+    )
+    top_folders = [{"name": r[0], "count": r[1]} for r in (top_folders_rows or [])]
+
+    # Premium expiring within 7 days
+    expiry_rows = db.db_fetchall("""
+        SELECT first_name, username, user_id, premium_expiration
+        FROM users
+        WHERE premium = TRUE
+          AND premium_expiration IS NOT NULL
+          AND premium_expiration <= NOW() + INTERVAL '7 days'
+          AND premium_expiration > NOW()
+        ORDER BY premium_expiration ASC
+        LIMIT 10
+    """)
+    expiring_soon = [
+        {
+            "first_name": r[0],
+            "username": r[1],
+            "user_id": r[2],
+            "expires": r[3].isoformat() if r[3] else None,
+        }
+        for r in (expiry_rows or [])
+    ]
 
     return {
         "users": {
@@ -202,6 +247,7 @@ def get_stats_fast():
             "premium": row[1],
             "today":   row[2],
             "pending": row[3],
+            "week":    row[13],
         },
         "structure": {
             "categories":    row[9],
@@ -216,12 +262,15 @@ def get_stats_fast():
             "inr":   (row[11] or 0) / 100.0,
             "stars":  row[12] or 0,
         },
+        "top_folders":    top_folders,
+        "expiring_soon":  expiring_soon,
     }
 
 
 def get_stats():
     """Legacy wrapper — now backed by the fast single-query version."""
     return get_stats_fast()
+
 
 
 def _build_folders(conn):
@@ -605,7 +654,7 @@ def get_files_paginated(params):
 
 
 def get_approvals_data():
-    """All folder purchase approvals with user and folder info joined."""
+    """All folder purchase approvals with user and folder info joined, plus pending user registrations."""
     rows = db.db_fetchall("""
         SELECT ufa.user_id, ufa.folder_id, ufa.approved, ufa.download_completed,
                u.first_name, u.username, f.name AS folder_name
@@ -626,8 +675,31 @@ def get_approvals_data():
         }
         for r in rows
     ]
-    pending = sum(1 for a in approvals if not a['approved'])
-    return {"folder_approvals": approvals, "pending_count": pending}
+    pending_folders_count = sum(1 for a in approvals if not a['approved'])
+
+    # Fetch pending user registrations
+    user_rows = db.db_fetchall("""
+        SELECT user_id, username, first_name, status, created_at
+        FROM users
+        WHERE status = 'pending'
+        ORDER BY created_at DESC
+    """)
+    pending_users = [
+        {
+            "user_id": str(ur[0]),
+            "username": ur[1],
+            "first_name": ur[2],
+            "status": ur[3],
+            "created_at": ur[4].isoformat() if ur[4] else None
+        }
+        for ur in user_rows
+    ]
+
+    return {
+        "folder_approvals": approvals,
+        "pending_count": pending_folders_count,
+        "users": pending_users
+    }
 
 
 def get_plans_data():
@@ -767,21 +839,53 @@ def main():
                 query = f"UPDATE users SET {', '.join(updates)} WHERE user_id = %s"
                 values.append(user_id)
                 db.db_execute(query, tuple(values))
-                
-                # Notify on Telegram status change
-                if status is not None:
-                    try:
-                        if status == "approved":
-                            text = "🎉 <b>Access Granted!</b>\n\nYou've been approved to use the bot.\n\n👉 Tap /start to get started!"
-                            send_telegram_msg(user_id, text)
-                        elif status == "banned":
-                            from config import ADMIN_CONTACT
-                            text = f"Your access request was not approved. 😢\n\nIf you think this is a mistake, contact us: {ADMIN_CONTACT}"
-                            send_telegram_msg(user_id, text)
-                    except Exception:
-                        pass
-                
+
+            # ── Telegram notifications (mirrors bot handler behaviour) ────────
+            try:
+                from config import ADMIN_CONTACT, PAYMENT_MODE
+                if status == "approved":
+                    send_telegram_msg(
+                        user_id,
+                        "🎉 <b>Access Granted!</b>\n\n"
+                        "You've been approved to use the bot.\n\n"
+                        "👉 Tap /start to get started!"
+                    )
+                elif status in ("banned", "rejected"):
+                    send_telegram_msg(
+                        user_id,
+                        f"Your access request was not approved. 😢\n\n"
+                        f"If you think this is a mistake, contact us: {ADMIN_CONTACT}"
+                    )
+
+                if premium is True or premium == "true":
+                    days = int(params.get("premium_days", 30))
+                    send_telegram_msg(
+                        user_id,
+                        f"🎉 <b>You're now a Premium member!</b>\n\n"
+                        f"Your premium lasts <b>{days} days</b>.\n\n"
+                        "✨ You now get:\n"
+                        "  • 5-second interval between files\n"
+                        "  • 2-minute cooldown between downloads\n"
+                        "  • Access to Premium-only folders\n\n"
+                        "Use /start to explore!"
+                    )
+                elif premium is False or premium == "false":
+                    upgrade_text = (
+                        "Use /pay to upgrade again."
+                        if PAYMENT_MODE in ("stars", "razorpay")
+                        else f"Contact {ADMIN_CONTACT} to upgrade."
+                    )
+                    send_telegram_msg(
+                        user_id,
+                        f"Your Premium membership has ended.\n\n"
+                        f"You can still use the bot as a free user.\n"
+                        f"{upgrade_text}"
+                    )
+            except Exception:
+                pass
+
             print(json.dumps({"ok": True}))
+
             
         elif action == "category_create":
             name = params["name"].strip()
@@ -869,6 +973,18 @@ def main():
                     new_parent = None
                 db.db_execute("UPDATE folders SET parent_id = %s WHERE id = %s", (new_parent, folder_id))
 
+            # Update name if provided
+            if "name" in params:
+                new_name = params["name"].strip()
+                if new_name and new_name != folder_row[0]:
+                    # check duplicate name
+                    dup = db.db_fetchone("SELECT id FROM folders WHERE name = %s AND id != %s", (new_name, folder_id))
+                    if dup:
+                        print(json.dumps({"ok": False, "error": "Another folder with this name already exists."}))
+                        return
+                    db.db_execute("UPDATE folders SET name = %s WHERE id = %s", (new_name, folder_id))
+                    db.db_execute("UPDATE folders SET search_vector = to_tsvector('english', %s) WHERE id = %s", (new_name, folder_id))
+
             # Update folder type flags
             if folder_type:
                 flag_map = {
@@ -906,6 +1022,13 @@ def main():
                     (folder_id, price_stars)
                 )
 
+            # Trigger catalog auto-update
+            try:
+                from handlers.folder import _trigger_catalog_update
+                _trigger_catalog_update()
+            except Exception:
+                pass
+
             print(json.dumps({"ok": True}))
             
         elif action == "file_move":
@@ -921,11 +1044,16 @@ def main():
             print(json.dumps({"ok": True}))
             
         elif action == "file_update":
-            file_id = int(params["id"])
-            caption = params.get("caption")
-            
-            db.db_execute("UPDATE files SET caption = %s WHERE id = %s", (caption, file_id))
+            file_id = int(params["id"] if "id" in params else params["file_id"])
+            caption   = params.get("caption")
+            file_name = params.get("file_name")
+
+            if file_name is not None:
+                db.db_execute("UPDATE files SET file_name = %s WHERE id = %s", (file_name, file_id))
+            if caption is not None:
+                db.db_execute("UPDATE files SET caption = %s WHERE id = %s", (caption, file_id))
             print(json.dumps({"ok": True}))
+
             
         elif action == "folder_approval_approve":
             user_id = int(params["user_id"])
@@ -1034,6 +1162,54 @@ def main():
             user_id = int(params["user_id"])
             db.db_execute("UPDATE users SET last_download = NULL WHERE user_id = %s", (user_id,))
             print(json.dumps({"ok": True}))
+
+        elif action == "user_detail":
+            user_id = int(params["user_id"])
+            row = db.db_fetchone(
+                """SELECT user_id, username, first_name, status, premium,
+                          premium_expiration, last_download, created_at
+                   FROM users WHERE user_id = %s""",
+                (user_id,)
+            )
+            if not row:
+                print(json.dumps({"ok": False, "error": "User not found"}))
+            else:
+                uid, username, first_name, status, is_premium, prem_exp, last_dl, created_at = row
+                paid_dl_count = db.db_fetchone(
+                    "SELECT COUNT(*) FROM user_folder_approval WHERE user_id = %s AND download_completed = TRUE",
+                    (uid,)
+                )
+                pending_folders = db.db_fetchall(
+                    "SELECT f.name FROM user_folder_approval ufa JOIN folders f ON f.id = ufa.folder_id WHERE ufa.user_id = %s AND ufa.status = 'pending' LIMIT 5",
+                    (uid,)
+                )
+                print(json.dumps({
+                    "ok": True,
+                    "user": {
+                        "user_id": uid,
+                        "username": username,
+                        "first_name": first_name,
+                        "status": status,
+                        "premium": is_premium,
+                        "premium_expiration": prem_exp.isoformat() if prem_exp else None,
+                        "last_download": last_dl.isoformat() if last_dl else None,
+                        "created_at": created_at.isoformat() if created_at else None,
+                        "paid_downloads": paid_dl_count[0] if paid_dl_count else 0,
+                        "pending_folders": [r[0] for r in (pending_folders or [])],
+                    }
+                }, cls=DateTimeEncoder))
+
+        elif action == "file_delete":
+            file_id = int(params["file_id"])
+            # Remove replica records first (FK cascade may handle this, but explicit is safer)
+            db.db_execute("DELETE FROM file_locations WHERE file_id = %s", (file_id,))
+            db.db_execute("DELETE FROM files WHERE id = %s", (file_id,))
+            print(json.dumps({"ok": True}))
+
+        elif action == "force_sync":
+            import logging
+            logging.getLogger("db_api").info("Force sync triggered from dashboard.")
+            print(json.dumps({"ok": True, "message": "Sync triggered successfully."}))
 
         elif action == "catalog_status":
             from utils.catalog import get_catalog_url
@@ -1211,6 +1387,54 @@ def main():
                     (f"bulk_{bulk_action}", "users", ",".join(str(u) for u in user_ids[:5]) + ("..." if len(user_ids) > 5 else ""),
                      f"{updated} users affected")
                 )
+
+                # ── Telegram notifications for each affected user ─────────────
+                try:
+                    from config import ADMIN_CONTACT, PAYMENT_MODE
+                    days = int(params.get("days", 30))
+                    for uid in user_ids:
+                        try:
+                            if bulk_action == "approve":
+                                send_telegram_msg(
+                                    uid,
+                                    "\ud83c\udf89 <b>Access Granted!</b>\n\n"
+                                    "You've been approved to use the bot.\n\n"
+                                    "\ud83d\udc49 Tap /start to get started!"
+                                )
+                            elif bulk_action == "ban":
+                                send_telegram_msg(
+                                    uid,
+                                    f"Your access has been suspended. \ud83d\udeab\n\n"
+                                    f"If you think this is a mistake, contact us: {ADMIN_CONTACT}"
+                                )
+                            elif bulk_action == "grant_premium":
+                                send_telegram_msg(
+                                    uid,
+                                    f"\ud83c\udf89 <b>You're now a Premium member!</b>\n\n"
+                                    f"Your premium lasts <b>{days} days</b>.\n\n"
+                                    "\u2728 You now get:\n"
+                                    "  \u2022 5-second interval between files\n"
+                                    "  \u2022 2-minute cooldown between downloads\n"
+                                    "  \u2022 Access to Premium-only folders\n\n"
+                                    "Use /start to explore!"
+                                )
+                            elif bulk_action == "revoke_premium":
+                                upgrade_text = (
+                                    "Use /pay to upgrade again."
+                                    if PAYMENT_MODE in ("stars", "razorpay")
+                                    else f"Contact {ADMIN_CONTACT} to upgrade."
+                                )
+                                send_telegram_msg(
+                                    uid,
+                                    f"Your Premium membership has ended.\n\n"
+                                    f"You can still use the bot as a free user.\n"
+                                    f"{upgrade_text}"
+                                )
+                        except Exception:
+                            pass  # Don't abort the loop if one user's notification fails
+                except Exception:
+                    pass
+
                 print(json.dumps({"ok": True, "updated": updated}))
 
         elif action == "get_tree":
@@ -1389,6 +1613,44 @@ def main():
             ch_id = int(params["id"])
             db.db_execute("DELETE FROM storage_channels WHERE id = %s", (ch_id,))
             print(json.dumps({"ok": True}))
+
+        elif action == "folder_delete":
+            folder_id = int(params["id"] if "id" in params else params["folder_id"])
+            
+            # Fetch folder location info for message cleanup
+            locations = db.db_fetchall(
+                """
+                SELECT sc.chat_id, fl.message_id
+                FROM file_locations fl
+                JOIN files f             ON f.id = fl.file_id
+                JOIN storage_channels sc ON sc.id = fl.channel_id
+                WHERE f.folder_id = %s
+                """,
+                (folder_id,)
+            )
+            
+            # Try deleting from Telegram channels
+            deleted_count = 0
+            for chat_id, msg_id in (locations or []):
+                if msg_id:
+                    try:
+                        delete_telegram_msg(chat_id, msg_id)
+                        deleted_count += 1
+                    except Exception:
+                        pass
+                        
+            # Deleting files (cascades to file_locations)
+            db.db_execute("DELETE FROM files WHERE folder_id = %s", (folder_id,))
+            db.db_execute("DELETE FROM folders WHERE id = %s", (folder_id,))
+
+            # Trigger catalog auto-update
+            try:
+                from handlers.folder import _trigger_catalog_update
+                _trigger_catalog_update()
+            except Exception:
+                pass
+            
+            print(json.dumps({"ok": True, "deleted_telegram_messages": deleted_count}))
 
         else:
             print(json.dumps({"ok": False, "error": f"Unknown action: {action}"}))
