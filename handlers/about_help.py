@@ -41,19 +41,21 @@ def get_help_content() -> str:
     upgrade_line = _premium_upgrade_line()
 
     return (
-        f"🏥 <b>How to Use {BOT_NAME}</b>\n\n"
+        f"🏥 <b>How to Use {BOT_NAME}</b>\n"
+        f"<b>──────────────────────────────────</b>\n\n"
 
         "📂 <b>Downloading Files</b>\n"
-        "📌 Tap any folder button in /start — files arrive automatically.\n"
+        "📌 Tap folder buttons in /start —\n"
+        "  files arrive automatically.\n"
         "  Or type: <code>/download &lt;folder name&gt;</code>\n\n"
 
         "⏱️ <b>Cooldown &amp; Speed</b>\n"
-        "  👤 Free — 60s per file · 7 min between downloads\n"
-        "  ⭐ Premium — 5s per file · 2 min between downloads\n\n"
+        "  👤 Free: 60s/file · 7m cooldown\n"
+        "  ⭐ Premium: 5s/file · 2m cooldown\n\n"
 
         "⚠️ <b>Important</b>\n"
-        "Files are removed from chat after a few minutes.\n"
-        "  💾 Forward to <b>Saved Messages</b> immediately!\n\n"
+        "Files are auto-removed from chat.\n"
+        "  💾 Forward to <b>Saved Messages</b>!\n\n"
 
         f"{upgrade_line}\n\n"
         "👤 Check your account: /status"
@@ -65,22 +67,27 @@ def get_about_content() -> str:
     upgrade_line = _premium_upgrade_line()
 
     return (
-        f"🏥 <b>{BOT_NAME}</b>\n\n"
-        "Your personal study companion on Telegram — organising and "
-        "delivering medical content directly to verified students.\n\n"
+        f"🏥 <b>{BOT_NAME}</b>\n"
+        f"<b>──────────────────────────────────</b>\n\n"
+        "Your study companion on Telegram,\n"
+        "organising and delivering medical\n"
+        "content to verified students.\n\n"
 
         "🔐 <b>Why verification?</b>\n"
-        "Access is limited to verified medical students to protect "
-        "content creators and avoid copyright issues.\n"
-        "By verifying, you help keep this resource alive for everyone. 🙏\n\n"
+        "Access is limited to verified\n"
+        "medical students to protect creators\n"
+        "and avoid copyright issues.\n"
+        "Your verification keeps this\n"
+        "resource alive for everyone! 🙏\n\n"
 
         "🎓 <b>How to get verified:</b>\n"
-        "  1️⃣ Take a photo of your student ID or enrollment letter\n"
+        "  1️⃣ Photo of your student ID\n"
+        "      or enrollment letter\n"
         f"  2️⃣ Send it to {ADMIN_CONTACT}\n"
-        "  3️⃣ Admin reviews and approves within a few hours\n\n"
+        "  3️⃣ Approved within a few hours\n\n"
 
-        "<i>Accepted: student ID card, enrollment certificate, "
-        "fee receipt with name + course.</i>\n\n"
+        "<i>Accepted: student ID card,\n"
+        "enrollment cert, fee receipt.</i>\n\n"
 
         f"{upgrade_line}\n\n"
 

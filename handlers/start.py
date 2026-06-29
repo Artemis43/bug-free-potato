@@ -81,8 +81,9 @@ async def send_ui(chat_id: int, message_id: int = None,
     # ── Header ────────────────────────────────────────────────────────────────
     greeting = f"<b>{chat_name}</b>"
     text = (
-        f"👋 Welcome, {greeting}!\n\n"
-        f"🏥 <b>{BOT_NAME}</b> ✨\n\n"
+        f"👋 Welcome, {greeting}!\n"
+        f"🏥 <b>{BOT_NAME}</b> ✨\n"
+        f"<b>──────────────────────────────────</b>\n"
     )
 
     if is_premium_user and premium_expiration:
@@ -90,11 +91,16 @@ async def send_ui(chat_id: int, message_id: int = None,
         if hasattr(exp, 'tzinfo') and exp.tzinfo:
             exp = exp.replace(tzinfo=None)
         days_left = (exp - datetime.now()).days
-        text += f"⭐ <b>Premium Access Active</b>\n🕒 Expires in: <code>{days_left} day(s)</code>\n\n"
+        text += f"⭐ <b>Premium Access Active</b>\n🕒 Expires in: <code>{days_left} day(s)</code>\n"
     elif is_premium_user:
-        text += "⭐ <b>Premium Access Active</b>\n🕒 Lifetime access\n\n"
+        text += "⭐ <b>Premium Access Active</b>\n🕒 Lifetime access\n"
     else:
-        text += "🔓 <b>Free Tier Active</b>\n💡 Upgrade to Premium for max download speed & no cooldowns.\n\n"
+        text += (
+            "🔓 <b>Free Tier Active</b>\n"
+            "💡 Upgrade to Premium for max download speed\n"
+            "   & no cooldowns.\n"
+        )
+    text += f"<b>──────────────────────────────────</b>\n\n"
 
     # ── Fetch categories ──────────────────────────────────────────────────────
     categories = db_fetchall("""
@@ -143,14 +149,14 @@ async def send_ui(chat_id: int, message_id: int = None,
         for cat_id, cat_name, emoji, folder_count, subcat_count in categories:
             parts = []
             if subcat_count > 0:
-                parts.append(f"{subcat_count} sub-categor{'ies' if subcat_count != 1 else 'y'}")
+                parts.append(f"{subcat_count} sub")
             if folder_count > 0 or not parts:
-                parts.append(f"{folder_count} folder{'s' if folder_count != 1 else ''}")
-            desc = " & ".join(parts)
+                parts.append(f"{folder_count} fld")
+            desc = "+".join(parts)
             text += f"  {emoji} <b>{esc(cat_name)}</b> ({desc})\n"
 
         if uncat_count > 0:
-            text += f"  📦 <b>Uncategorized</b> ({uncat_count} folder{'s' if uncat_count != 1 else ''})\n"
+            text += f"  📦 <b>Uncategorized</b> ({uncat_count} fld)\n"
 
         if trending:
             text += "\n🔥 <b>Trending:</b>\n"
@@ -972,9 +978,9 @@ async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
                 )
             except Exception:
                 pass
-            await send_ui(user_id, message_id=cq.message.message_id, is_returning=True)
+            return
 
-
+        await send_ui(user_id, message_id=cq.message.message_id, is_returning=True)
 async def send_hierarchy_ui(chat_id: int, node_type: str, node_id: int, message_id: int = None, page: int = 0):
     bot = get_bot()
     user_data = db_fetchone('SELECT premium FROM users WHERE user_id = %s', (chat_id,))
@@ -1015,14 +1021,17 @@ async def send_hierarchy_ui(chat_id: int, node_type: str, node_id: int, message_
         
         text = (
             f"<b>📂 Navigation Path:</b>\n"
-            f"📍 <code>{esc(crumbs_text)}</code>\n\n"
-            f"Select a category or folder below to browse (page {page + 1}/{total_pages}):\n\n"
+            f"📍 <code>{esc(crumbs_text)}</code>\n"
+            f"<b>──────────────────────────────────</b>\n"
+            f"Select a category or folder below to browse\n"
+            f"(page {page + 1}/{total_pages}):\n"
+            f"<b>──────────────────────────────────</b>\n\n"
         )
         
         for item_type, iid, name, emoji, count, has_children, premium, admin_approval in page_items:
             if item_type == 'c':
-                text += f"• 📂 <code>{esc(name)}</code> — <i>{count} folder{'s' if count != 1 else ''}</i>\n"
-                keyboard.row(InlineKeyboardButton(f"📂 {name}", callback_data=f"nav:c:{iid}:0"))
+                text += f"• 📂 <code>{esc(name)}</code> ({count} fld)\n"
+                keyboard.row(InlineKeyboardButton(f"📂 {name} ({count})", callback_data=f"nav:c:{iid}:0"))
             else:
                 safe_name = esc(name)
                 if not is_premium_user and premium:
@@ -1031,13 +1040,13 @@ async def send_hierarchy_ui(chat_id: int, node_type: str, node_id: int, message_
                     tag, btn_icon = " [💰 Paid]", "💰"
                 else:
                     tag, btn_icon = "", "📁"
-                text += f"• {btn_icon} <code>{safe_name}</code>{tag} — <i>{count} file{'s' if count != 1 else ''}</i>\n"
+                text += f"• {btn_icon} <code>{safe_name}</code>{tag} ({count} files)\n"
                 
                 if has_children:
                     callback_data = f"nav:f:{iid}:0"
                 else:
                     callback_data = f"fi:{iid}:0"
-                keyboard.row(InlineKeyboardButton(f"{btn_icon} {name}", callback_data=callback_data))
+                keyboard.row(InlineKeyboardButton(f"{btn_icon} {name} ({count})", callback_data=callback_data))
                 
         # Pagination row
         nav_buttons = []
@@ -1075,8 +1084,11 @@ async def send_hierarchy_ui(chat_id: int, node_type: str, node_id: int, message_
         
         text = (
             f"<b>📁 Folder Contents:</b>\n"
-            f"📍 <code>{esc(crumbs_text)}</code>\n\n"
-            f"Browse sub-folders (page {page + 1}/{total_pages}):\n\n"
+            f"📍 <code>{esc(crumbs_text)}</code>\n"
+            f"<b>──────────────────────────────────</b>\n"
+            f"Browse sub-folders\n"
+            f"(page {page + 1}/{total_pages}):\n"
+            f"<b>──────────────────────────────────</b>\n\n"
         )
         
         for fid, name, emoji, premium, admin_approval, file_count, has_children in page_folders:
@@ -1087,13 +1099,13 @@ async def send_hierarchy_ui(chat_id: int, node_type: str, node_id: int, message_
                 tag, btn_icon = " [💰 Paid]", "💰"
             else:
                 tag, btn_icon = "", "📁"
-            text += f"• {btn_icon} <code>{safe_name}</code>{tag} — <i>{file_count} file{'s' if file_count != 1 else ''}</i>\n"
+            text += f"• {btn_icon} <code>{safe_name}</code>{tag} ({file_count} files)\n"
             
             if has_children:
                 callback_data = f"nav:f:{fid}:0"
             else:
                 callback_data = f"fi:{fid}:0"
-            keyboard.row(InlineKeyboardButton(f"{btn_icon} {name}", callback_data=callback_data))
+            keyboard.row(InlineKeyboardButton(f"{btn_icon} {name} ({file_count})", callback_data=callback_data))
             
         # Pagination row
         nav_buttons = []
@@ -1255,7 +1267,10 @@ async def _cb_fav_list(cq: types.CallbackQuery, bot, user_id: int) -> None:
     
     favs = get_user_favorites(user_id)
     
-    text = "⭐ <b>Your Favorites:</b>\n\n"
+    text = (
+        "⭐ <b>Your Favorites:</b>\n"
+        "<b>──────────────────────────────────</b>\n\n"
+    )
     keyboard = InlineBuilder()
     
     if not favs:
@@ -1263,9 +1278,9 @@ async def _cb_fav_list(cq: types.CallbackQuery, bot, user_id: int) -> None:
         text += "Tap the <b>⭐ Add Favorite</b> button on any folder page to save it here!"
     else:
         for fid, name, emoji, file_count, has_children in favs:
-            text += f"• {emoji} <code>{esc(name)}</code> — <i>{file_count} file{'s' if file_count != 1 else ''}</i>\n"
+            text += f"• {emoji} <code>{esc(name)}</code> ({file_count} files)\n"
             callback_data = f"nav:f:{fid}:0" if has_children else f"fi:{fid}:0"
-            keyboard.row(InlineKeyboardButton(f"{emoji} {name}", callback_data=callback_data))
+            keyboard.row(InlineKeyboardButton(f"{emoji} {name} ({file_count})", callback_data=callback_data))
             
     keyboard.row(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="cat_main"))
     
@@ -1286,7 +1301,10 @@ async def _cb_hist_list(cq: types.CallbackQuery, bot, user_id: int) -> None:
     
     history = get_recent_downloads(user_id)
     
-    text = "📥 <b>Recent Downloads:</b>\n\n"
+    text = (
+        "📥 <b>Recent Downloads:</b>\n"
+        "<b>──────────────────────────────────</b>\n\n"
+    )
     keyboard = InlineBuilder()
     
     if not history:
@@ -1294,7 +1312,7 @@ async def _cb_hist_list(cq: types.CallbackQuery, bot, user_id: int) -> None:
     else:
         for fid, name, emoji, downloaded_at in history:
             ts = downloaded_at.strftime("%d/%m/%Y") if downloaded_at else ""
-            text += f"• {emoji} <code>{esc(name)}</code> — <i>Downloaded on {ts}</i>\n"
+            text += f"• {emoji} <code>{esc(name)}</code> (Downloaded {ts})\n"
             keyboard.row(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"fi:{fid}:0"))
             
     keyboard.row(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="cat_main"))
@@ -1316,7 +1334,10 @@ async def _cb_new_list(cq: types.CallbackQuery, bot, user_id: int) -> None:
     
     new_folders = get_recently_added_folders(5)
     
-    text = "🆕 <b>What's New (Recently Added):</b>\n\n"
+    text = (
+        "🆕 <b>What's New (Recently Added):</b>\n"
+        "<b>──────────────────────────────────</b>\n\n"
+    )
     keyboard = InlineBuilder()
     
     if not new_folders:
@@ -1324,8 +1345,8 @@ async def _cb_new_list(cq: types.CallbackQuery, bot, user_id: int) -> None:
     else:
         for fid, name, emoji, created_at, file_count in new_folders:
             ts = created_at.strftime("%d/%m/%Y") if created_at else ""
-            text += f"• {emoji} <code>{esc(name)}</code> — <i>{file_count} files (Added {ts})</i>\n"
-            keyboard.row(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"fi:{fid}:0"))
+            text += f"• {emoji} <code>{esc(name)}</code> ({file_count} files, Added {ts})\n"
+            keyboard.row(InlineKeyboardButton(f"{emoji} {name} ({file_count})", callback_data=f"fi:{fid}:0"))
             
     keyboard.row(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="cat_main"))
     
