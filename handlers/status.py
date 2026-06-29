@@ -41,6 +41,7 @@ async def build_status_text(user_id: int, bot=None) -> Tuple[str, Optional[Inlin
 
     lines = [
         "👤 <b>Account Status</b>",
+        "<b>──────────────────────────────────</b>",
         "",
         f"<b>Name:</b>     {display_name}",
         f"<b>Username:</b> {uname_str}",
@@ -90,6 +91,7 @@ async def build_status_text(user_id: int, bot=None) -> Tuple[str, Optional[Inlin
 
     lines.append(f"<b>Plan:</b>     {premium_line}")
     lines.append("")
+    lines.append("<b>──────────────────────────────────</b>")
 
     # ── Cooldown ──────────────────────────────────────────────────────────
     cooldown_mins = 2 if is_premium else 7

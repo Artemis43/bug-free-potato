@@ -101,8 +101,9 @@ async def _run_download(
     if not files:
         await bot.send_message(
             chat_id,
-            "⚠️ <b>No files found</b> in this folder yet.\n"
-            "Check back soon — content is being added!\n"
+            "⚠️ <b>No files found</b> in this folder.\n"
+            "<b>──────────────────────────────────</b>\n\n"
+            "Content is being added soon.\n"
             "Use /start to return to the menu.",
             parse_mode=ParseMode.HTML,
         )
@@ -135,9 +136,10 @@ async def _run_download(
 
     if not is_premium:
         upsell = (
-            "\n\n💳 Use /pay for 5s intervals & no cooldowns"
+            "\n\n💳 Use /pay for 5s intervals\n"
+            "   & no cooldowns between downloads"
             if PAYMENT_MODE in ('stars', 'razorpay')
-            else '\n\n💳 Contact ' + ADMIN_CONTACT + ' to upgrade for 5s intervals'
+            else '\n\n💳 Contact ' + ADMIN_CONTACT + '\n   to upgrade for 5s intervals'
         )
     else:
         upsell = ""
@@ -147,12 +149,14 @@ async def _run_download(
 
     progress_text = progress.build_progress_text(chat_id, file_interval)
     info_text = (
-        f"{tier_ico} <b>{tier} Download</b>\n\n"
+        f"{tier_ico} <b>{tier} Download</b>\n"
+        f"<b>──────────────────────────────────</b>\n"
         f"👤 {display_name}\n"
-        f"📂 Folder: <code>{esc(folder_name)}</code> ({folder_type})\n"
-        f"⏱ Interval: <code>{file_interval}s</code> between files\n"
+        f"📂 <code>{esc(folder_name)}</code> ({folder_type})\n"
+        f"⏱ Interval: <code>{file_interval}s</code>/file\n"
         f"⏳ Next download in: <code>{next_dl_minutes} min</code>"
-        f"{upsell}\n\n"
+        f"{upsell}\n"
+        f"<b>──────────────────────────────────</b>\n"
         f"{progress_text}"
     )
 

@@ -826,14 +826,16 @@ async def _cb_info_premium(cq: types.CallbackQuery, bot, user_id: int) -> None:
         await bot.edit_message_text(
             chat_id=cq.message.chat.id, message_id=cq.message.message_id,
             text=(
-                f"⭐ <b>Premium Membership</b>\n\n"
+                f"⭐ <b>Premium Membership</b>\n"
+                "<b>──────────────────────────────────</b>\n\n"
                 "<b>What you get:</b>\n"
-                f"  • ⚡ 5s interval between files  <i>(vs 60s free)</i>\n"
-                f"  • ⏱ 2 min cooldown  <i>(vs 7 min free)</i>\n"
-                f"  • ⭐ Access to all Premium-only folders\n\n"
+                "  • ⚡ 5s/file  <i>(vs 60s on free)</i>\n"
+                "  • ⏱ 2 min cooldown  <i>(vs 7 min)</i>\n"
+                "  • ⭐ Premium-only folder access\n\n"
                 f"<b>Plans:</b>\n{plan_lines}\n\n"
-                f"<b>How to subscribe:</b>\n  {how_to}\n\n"
-                f"<i>Tap 🔙 Back to Menu to return to the folder list.</i>"
+                f"<b>How to subscribe:</b>\n"
+                f"  {how_to}\n\n"
+                "<i>Tap 🔙 Back to return to menu.</i>"
             ),
             parse_mode=ParseMode.HTML, reply_markup=kb.build(),
         )
@@ -850,19 +852,20 @@ async def _cb_info_verify(cq: types.CallbackQuery, bot, user_id: int) -> None:
         await bot.edit_message_text(
             chat_id=cq.message.chat.id, message_id=cq.message.message_id,
             text=(
-                "🎓 <b>Student Verification</b>\n\n"
-                "Access is limited to verified medical students\n"
-                "to protect our content from redistribution.\n\n"
+                "🎓 <b>Student Verification</b>\n"
+                "<b>──────────────────────────────────</b>\n\n"
+                "Access is limited to verified medical\n"
+                "students to protect our content.\n\n"
                 "<b>How to verify:</b>\n"
-                "  1️⃣ Take a photo of your student ID or enrollment letter\n"
+                "  1️⃣ Photo of your student ID\n"
+                "      or enrollment letter\n"
                 f"  2️⃣ Send it to: {ADMIN_CONTACT}\n"
-                "  3️⃣ Admin reviews and approves within a few hours\n\n"
+                "  3️⃣ Approved within a few hours\n\n"
                 "<b>Accepted documents:</b>\n"
-                "  • College / University student ID card\n"
+                "  • Student ID card\n"
                 "  • Enrollment certificate\n"
-                "  • Fee receipt with your name + course\n\n"
-                "<i>Once approved you'll get a notification here.\n"
-                "Tap 🔙 Back to Menu to return.</i>"
+                "  • Fee receipt (name + course)\n\n"
+                "<i>You'll get a notification once approved.</i>"
             ),
             parse_mode=ParseMode.HTML, reply_markup=kb.build(),
         )
@@ -915,42 +918,56 @@ async def _cb_back_to_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
             await bot.edit_message_text(
                 chat_id=cq.message.chat.id, message_id=cq.message.message_id,
                 text=(
-                    f"Hello {esc(first_name or 'there')}! 👋\n\n"
-                    f"<b>I'm {BOT_NAME}</b> ✨\n\n"
-                    "Access is limited to verified medical students to protect the content. 🙃\n\n"
-                    "Your request has been sent to an admin.\n"
-                    "Tap <b>How to Verify</b> below to see what to send them.\n\n"
-                    "You'll be notified here as soon as your request is reviewed! ✅"
+                    f"👋 Hello {esc(first_name or 'there')}!\n"
+                    f"<b>I'm {BOT_NAME}</b> ✨\n"
+                    "<b>──────────────────────────────────</b>\n\n"
+                    "🔒 Access is limited to verified\n"
+                    "medical students to protect content.\n\n"
+                    "Your request has been sent to admin.\n"
+                    "Tap <b>How to Verify</b> to see\n"
+                    "what documents to send them.\n\n"
+                    "✅ You'll be notified once reviewed!"
                 ),
                 parse_mode=ParseMode.HTML, reply_markup=kb.build(),
             )
         except Exception:
             pass
     elif user_status == 'rejected':
+        kb = InlineBuilder()
+        kb.row(InlineKeyboardButton("💬 Contact Admin", url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"))
         try:
             await bot.edit_message_text(
                 chat_id=cq.message.chat.id, message_id=cq.message.message_id,
                 text=(
-                    f"Your access request was not approved. 😢\n\n"
-                    f"If you think this is a mistake, contact us: {ADMIN_CONTACT}"
+                    "❌ <b>Access Not Approved</b>\n"
+                    "<b>──────────────────────────────────</b>\n\n"
+                    "Unfortunately your access request\n"
+                    "was not approved. 😢\n\n"
+                    f"If you think this is a mistake,\n"
+                    f"contact us at: {ADMIN_CONTACT}"
                 ),
-                reply_markup=None,
+                parse_mode=ParseMode.HTML,
+                reply_markup=kb.build(),
             )
         except Exception:
             pass
     elif user_status == 'banned':
         try:
             kb = InlineBuilder()
-            kb.add(InlineKeyboardButton(
+            kb.row(InlineKeyboardButton(
                 "💬 Appeal to Admin",
                 url=f"https://t.me/{ADMIN_CONTACT.lstrip('@')}"
             ))
             await bot.edit_message_text(
                 chat_id=cq.message.chat.id, message_id=cq.message.message_id,
                 text=(
-                    f"Hi {esc(first_name or 'there')}, you have been found to have violated the rules, and hence are now banned. 🚫\n\n"
-                    "If you believe this is a mistake or would like to appeal, "
-                    "please contact the admin directly."
+                    f"🚫 <b>Account Banned</b>\n"
+                    "<b>──────────────────────────────────</b>\n\n"
+                    f"Hi {esc(first_name or 'there')},\n"
+                    "you have been banned for violating\n"
+                    "our community rules.\n\n"
+                    "If you believe this is a mistake,\n"
+                    "please contact the admin to appeal."
                 ),
                 parse_mode=ParseMode.HTML,
                 reply_markup=kb.build(),
@@ -1118,7 +1135,7 @@ async def send_hierarchy_ui(chat_id: int, node_type: str, node_id: int, message_
             
         # Action buttons
         is_fav = db_fetchone("SELECT 1 FROM user_favorites WHERE user_id = %s AND folder_id = %s", (chat_id, node_id))
-        fav_label = "⭐ Remove Favorite" if is_fav else "⭐ Add Favorite"
+        fav_label = "★ Unfavorite" if is_fav else "☆ Favorite"
         keyboard.row(
             InlineKeyboardButton("📥 Download All", callback_data=f"dl:{node_id}"),
             InlineKeyboardButton(fav_label, callback_data=f"fav:{node_id}")
@@ -1183,15 +1200,19 @@ async def _cb_file_preview(cq: types.CallbackQuery, bot, user_id: int) -> None:
     
     text = (
         f"<b>📁 File Preview:</b>\n"
-        f"📂 Folder: <code>{esc(folder_name)}</code>\n"
-        f"Total Files: {len(files)}\n\n"
-        f"Select a file to download/copy, or select Download All below:\n\n"
+        f"📂 <code>{esc(folder_name)}</code>\n"
+        f"<b>──────────────────────────────────</b>\n"
+        f"Total: {len(files)} file{'s' if len(files) != 1 else ''}"
+        f" — page {page + 1}/{total_pages}\n"
+        f"<b>──────────────────────────────────</b>\n\n"
     )
     
     keyboard = InlineBuilder()
     for fid, fname, ftype in page_files:
-        text += f"• 📄 <code>{esc(fname)}</code>\n"
-        keyboard.row(InlineKeyboardButton(f"📄 {fname}", callback_data=f"dl_file:{fid}:{folder_id}:{page}"))
+        icon = {"video": "🎥", "photo": "🖼️", "audio": "🎵"}.get(ftype, "📄")
+        short = fname if len(fname) <= 32 else fname[:29] + "…"
+        text += f"• {icon} <code>{esc(short)}</code>\n"
+        keyboard.row(InlineKeyboardButton(f"{icon} {short}", callback_data=f"dl_file:{fid}:{folder_id}:{page}"))
         
     # Pagination
     nav_buttons = []
@@ -1203,10 +1224,8 @@ async def _cb_file_preview(cq: types.CallbackQuery, bot, user_id: int) -> None:
         keyboard.row(*nav_buttons)
         
     # Actions
-    keyboard.row(
-        InlineKeyboardButton("📥 Download All", callback_data=f"dl:{folder_id}"),
-        InlineKeyboardButton("🔙 Back to Folder", callback_data=f"nav:f:{folder_id}:0")
-    )
+    keyboard.row(InlineKeyboardButton("📥 Download All", callback_data=f"dl:{folder_id}"))
+    keyboard.row(InlineKeyboardButton("🔙 Back", callback_data=f"nav:f:{folder_id}:0"))
     
     try:
         await bot.edit_message_text(

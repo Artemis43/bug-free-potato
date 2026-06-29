@@ -110,11 +110,12 @@ async def cmd_search(message: types.Message, state: FSMContext):
     # Otherwise, enter FSM waiting state
     await state.set_state(SearchState.waiting_for_query)
     await message.reply(
-        "🔍 <b>Search Folders</b>\n\n"
-        "Type the name of the folder you're looking for.\n"
-        "I support partial names, typos, and keywords!\n\n"
-        "<i>Examples: anatomy, pharma, surgery notes</i>\n\n"
-        "👇 <b>Type your search query below:</b>",
+        "🔍 <b>Search Folders</b>\n"
+        "<b>──────────────────────────────────</b>\n\n"
+        "Type the folder name you're looking for.\n"
+        "Supports partial names and keywords!\n\n"
+        "<i>Examples: anatomy, pharma, surgery</i>\n\n"
+        "👇 <b>Type your search query:</b>",
         parse_mode=ParseMode.HTML,
         reply_markup=_search_prompt_keyboard(),
     )
@@ -141,11 +142,12 @@ async def cb_search(cq: types.CallbackQuery, state: FSMContext = None):
             chat_id=cq.message.chat.id,
             message_id=cq.message.message_id,
             text=(
-                "🔍 <b>Search Folders</b>\n\n"
-                "Type the name of the folder you're looking for.\n"
-                "Supports partial names, abbreviations, and typos!\n\n"
-                "<i>Examples: anatomy, pharma, surgery notes, biochem</i>\n\n"
-                "👇 <b>Send your search query as a message:</b>"
+                "🔍 <b>Search Folders</b>\n"
+                "<b>──────────────────────────────────</b>\n\n"
+                "Type the folder name you're looking for.\n"
+                "Supports partial names and keywords!\n\n"
+                "<i>Examples: anatomy, pharma, surgery</i>\n\n"
+                "👇 <b>Send your query as a message:</b>"
             ),
             parse_mode=ParseMode.HTML,
             reply_markup=kb.build(),
@@ -194,13 +196,14 @@ async def _execute_search(chat_id: int, query: str, state: FSMContext, reply_fn=
 
     if not results:
         text = (
-            f"🔍 <b>No results for</b> '<code>{safe_query}</code>'\n\n"
+            f"🔍 <b>No results for</b> '<code>{safe_query}</code>'\n"
+            "<b>──────────────────────────────────</b>\n\n"
             "💡 <b>Suggestions:</b>\n"
             "  • Try a shorter keyword\n"
             "  • Check for typos\n"
-            "  • Use subject names (anatomy, pharma…)\n"
-            f"  • Browse categories via /start\n\n"
-            f"<i>Contact {ADMIN_CONTACT} if you can't find what you need.</i>"
+            "  • Use subject names\n"
+            "  • Browse categories via /start\n\n"
+            f"<i>Contact {ADMIN_CONTACT} for help.</i>"
         )
         kb = _no_results_keyboard()
         if reply_fn:
@@ -210,14 +213,18 @@ async def _execute_search(chat_id: int, query: str, state: FSMContext, reply_fn=
         return
 
     # Build result text
-    lines = [f"🔍 <b>Search results for</b> '<code>{safe_query}</code>'\n"]
+    lines = [
+        f"🔍 <b>Search results for</b> '<code>{safe_query}</code>'",
+        "<b>──────────────────────────────────</b>",
+        "",
+    ]
     for folder_id, name, file_count, premium, admin_approval, category_name in results:
         file_count = file_count or 0
         icon = "⭐" if premium else ("💰" if admin_approval else "📁")
         cat_tag = f" <i>[{esc(category_name)}]</i>" if category_name else ""
-        lines.append(f"  {icon} <code>{esc(name)}</code>{cat_tag} — {file_count} file{'s' if file_count != 1 else ''}")
+        lines.append(f"  {icon} <code>{esc(name)}</code>{cat_tag} ({file_count} files)")
 
-    lines.append(f"\n<i>Showing {len(results)} result(s) · Tap a button to download</i>")
+    lines.append(f"\n<i>Showing {len(results)} result(s) — tap to download</i>")
     text = '\n'.join(lines)
     kb = _search_result_keyboard(results)
 
