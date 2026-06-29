@@ -110,6 +110,10 @@ def dispatch(action: str, params: dict) -> dict:
             old_env[k] = os.environ.get(k)
             os.environ[k] = v
 
+        import importlib
+        import config
+        importlib.reload(config)
+
         sys.argv   = ['db_api.py', action, encoded]
         sys.stdout = buf
         db_api.main()
@@ -127,6 +131,9 @@ def dispatch(action: str, params: dict) -> dict:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = old_val
+        import importlib
+        import config
+        importlib.reload(config)
 
     output = buf.getvalue().strip()
     if not output:

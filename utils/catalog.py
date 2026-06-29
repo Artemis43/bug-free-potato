@@ -15,7 +15,7 @@ import urllib.parse
 import urllib.error
 from datetime import datetime
 
-from config import BOT_NAME
+import config
 
 log = logging.getLogger(__name__)
 
@@ -51,8 +51,8 @@ def _get_or_create_account() -> str:
     # Create a new Telegra.ph account
     try:
         resp = _telegraph_post("createAccount", {
-            "short_name": BOT_NAME[:32],
-            "author_name": BOT_NAME[:128],
+            "short_name": config.BOT_NAME[:32],
+            "author_name": config.BOT_NAME[:128],
         })
         if resp.get("ok"):
             token = resp["result"]["access_token"]
@@ -96,7 +96,7 @@ def _build_nodes(bot_username: str) -> list:
     nodes.append({
         "tag": "blockquote",
         "children": [
-            {"tag": "strong", "children": [f"⚡ Welcome to the {BOT_NAME} Catalog!"]},
+            {"tag": "strong", "children": [f"⚡ Welcome to the {config.BOT_NAME} Catalog!"]},
             {"tag": "br"},
             "Browse our organized library of files and resources. Click any folder title below to open it directly in the Telegram bot and download its content instantly."
         ]
@@ -224,7 +224,7 @@ async def generate_catalog(bot_username: str, force: bool = False) -> str:
             return ""
 
         page_path = get_catalog_config("telegraph_page_path")
-        title = f"{BOT_NAME} — Full Content Catalog"
+        title = f"{config.BOT_NAME} — Full Content Catalog"
 
         if page_path:
             # Update the existing page
@@ -233,7 +233,7 @@ async def generate_catalog(bot_username: str, force: bool = False) -> str:
                 "path": page_path,
                 "title": title,
                 "content": nodes,
-                "author_name": BOT_NAME,
+                "author_name": config.BOT_NAME,
             })
         else:
             # Create a new page
@@ -241,7 +241,7 @@ async def generate_catalog(bot_username: str, force: bool = False) -> str:
                 "access_token": token,
                 "title": title,
                 "content": nodes,
-                "author_name": BOT_NAME,
+                "author_name": config.BOT_NAME,
                 "return_content": False,
             })
 
