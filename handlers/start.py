@@ -15,7 +15,7 @@ from utils.database import (
     get_folder_breadcrumb, get_category_breadcrumb,
     get_subtree_file_count, toggle_user_favorite,
     get_user_favorites, get_recent_downloads, get_recently_added_folders,
-    record_download_history
+    record_download_history, get_folder_direct_file_count,
 )
 from utils.helpers import notify_admins, esc
 from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, ADMIN_CONTACT, PAYMENT_MODE, BOT_NAME
@@ -234,111 +234,10 @@ async def send_ui(chat_id: int, message_id: int = None,
 
 async def send_category_ui(chat_id: int, category_id: int, message_id: int = None, page: int = 0):
     """
-    Show paginated folders within a specific category.
-    category_id=0 means the 'Uncategorized' pseudo-category.
+    Thin compatibility shim — all category navigation now goes through
+    send_hierarchy_ui so sub-categories and sub-folders are shown correctly.
     """
-    bot = get_bot()
-
-    user_data = db_fetchone(
-        'SELECT premium FROM users WHERE user_id = %s', (chat_id,)
-    )
-    is_premium_user = bool(user_data and user_data[0])
-
-    if category_id == 0:
-        # Uncategorized pseudo-category
-        cat_name  = "Uncategorized"
-        cat_emoji = "📦"
-        all_folders = db_fetchall("""
-            SELECT f.id, f.name, f.premium, f.admin_approval,
-                   COUNT(fi.id) AS file_count
-            FROM folders f
-            LEFT JOIN files fi ON fi.folder_id = f.id
-            WHERE f.category_id IS NULL AND f.parent_id IS NULL
-            GROUP BY f.id
-            ORDER BY f.name
-        """)
-    else:
-        cat_row = db_fetchone(
-            "SELECT name, emoji FROM categories WHERE id = %s", (category_id,)
-        )
-        if not cat_row:
-            await send_ui(chat_id, message_id)
-            return
-        cat_name, cat_emoji = cat_row
-        all_folders = db_fetchall("""
-            SELECT f.id, f.name, f.premium, f.admin_approval,
-                   COUNT(fi.id) AS file_count
-            FROM folders f
-            LEFT JOIN files fi ON fi.folder_id = f.id
-            WHERE f.category_id = %s AND f.parent_id IS NULL
-            GROUP BY f.id
-            ORDER BY f.name
-        """, (category_id,))
-
-    keyboard = InlineBuilder()
-
-    if not all_folders:
-        text = (
-            f"{cat_emoji} <b>{esc(cat_name)}</b>\n\n"
-            "📭 No folders in this category yet.\n"
-            "Admin can add folders with <code>/movefolder</code>."
-        )
-        keyboard.row(InlineKeyboardButton("🔙 Back to Categories", callback_data="cat_main"))
-    else:
-        total_pages  = max(1, (len(all_folders) + _PAGE_SIZE - 1) // _PAGE_SIZE)
-        page         = max(0, min(page, total_pages - 1))
-        page_folders = all_folders[page * _PAGE_SIZE:(page + 1) * _PAGE_SIZE]
-
-        text = (
-            f"{cat_emoji} <b>{esc(cat_name)}</b>"
-            f" — {len(all_folders)} folder{'s' if len(all_folders) != 1 else ''}"
-            f" (page {page + 1}/{total_pages})\n\n"
-        )
-
-        for folder_id, folder_name, premium, admin_approval, file_count in page_folders:
-            safe_name = esc(folder_name)
-            file_count = file_count or 0
-
-            if not is_premium_user and premium:
-                tag      = " [⭐ Premium]"
-                btn_icon = "⭐"
-            elif admin_approval:
-                tag      = " [💰 Paid]"
-                btn_icon = "💰"
-            else:
-                tag      = ""
-                btn_icon = "📁"
-
-            text += f"• <code>{safe_name}</code>{tag} — <i>{file_count} file{'s' if file_count != 1 else ''}</i>\n"
-
-            label = f"{btn_icon} {folder_name} ({file_count})"
-            if len(label) > 36:
-                label = label[:33] + "…"
-            keyboard.row(InlineKeyboardButton(label, callback_data=f"dl:{folder_id}"))
-
-        # Pagination controls
-        nav_buttons = []
-        if page > 0:
-            nav_buttons.append(InlineKeyboardButton(f"◀️ Page {page}", callback_data=f"cat:{category_id}:{page - 1}"))
-        if page < total_pages - 1:
-            nav_buttons.append(InlineKeyboardButton(f"Page {page + 2} ▶️", callback_data=f"cat:{category_id}:{page + 1}"))
-        if nav_buttons:
-            keyboard.row(*nav_buttons)
-
-        keyboard.row(InlineKeyboardButton("🔙 Back to Categories", callback_data="cat_main"))
-
-    try:
-        if message_id:
-            await bot.edit_message_text(
-                chat_id=chat_id, message_id=message_id,
-                text=text, reply_markup=keyboard.build(), parse_mode=ParseMode.HTML
-            )
-        else:
-            await bot.send_message(
-                chat_id, text, reply_markup=keyboard.build(), parse_mode=ParseMode.HTML
-            )
-    except TelegramBadRequest:
-        pass
+    await send_hierarchy_ui(chat_id, 'c', category_id, message_id, page)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -370,7 +269,7 @@ async def _cb_page(cq: types.CallbackQuery, bot, user_id: int) -> None:
 
 
 async def _cb_category(cq: types.CallbackQuery, bot, user_id: int) -> None:
-    """cat:<category_id>:<page> — show folders in a category."""
+    """cat:<category_id>:<page> — show folders/sub-categories in a category (hierarchical)."""
     try:
         _, cat_id_str, page_str = cq.data.split(':', 2)
         category_id = int(cat_id_str)
@@ -390,7 +289,8 @@ async def _cb_category(cq: types.CallbackQuery, bot, user_id: int) -> None:
         return
 
     await cq.answer()
-    await send_category_ui(user_id, category_id, cq.message.message_id, page)
+    # Route all category navigation through the unified hierarchy UI
+    await send_hierarchy_ui(user_id, 'c', category_id, cq.message.message_id, page)
 
 
 async def _cb_category_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
@@ -1136,10 +1036,23 @@ async def send_hierarchy_ui(chat_id: int, node_type: str, node_id: int, message_
         # Action buttons
         is_fav = db_fetchone("SELECT 1 FROM user_favorites WHERE user_id = %s AND folder_id = %s", (chat_id, node_id))
         fav_label = "★ Unfavorite" if is_fav else "☆ Favorite"
-        keyboard.row(
-            InlineKeyboardButton("📥 Download All", callback_data=f"dl:{node_id}"),
-            InlineKeyboardButton(fav_label, callback_data=f"fav:{node_id}")
-        )
+
+        # C2: If the folder has BOTH sub-folders AND direct files,
+        # show a dedicated button to view/download only the direct files.
+        direct_file_count = get_folder_direct_file_count(node_id)
+        if direct_file_count > 0:
+            keyboard.row(
+                InlineKeyboardButton("📥 Download All (incl. sub-folders)", callback_data=f"dl:{node_id}"),
+            )
+            keyboard.row(
+                InlineKeyboardButton(f"📄 View Direct Files ({direct_file_count})", callback_data=f"fi:{node_id}:0"),
+                InlineKeyboardButton(fav_label, callback_data=f"fav:{node_id}")
+            )
+        else:
+            keyboard.row(
+                InlineKeyboardButton("📥 Download All", callback_data=f"dl:{node_id}"),
+                InlineKeyboardButton(fav_label, callback_data=f"fav:{node_id}")
+            )
         
         if parent_id is not None:
             keyboard.row(InlineKeyboardButton("🔙 Up One Level", callback_data=f"nav:f:{parent_id}:0"))
@@ -1223,9 +1136,20 @@ async def _cb_file_preview(cq: types.CallbackQuery, bot, user_id: int) -> None:
     if nav_buttons:
         keyboard.row(*nav_buttons)
         
-    # Actions
+    # C1: Back button navigates UP (to parent folder, parent category, or main menu)
+    # NOT back to nav:f:<folder_id> which would loop into this same folder's sub-folder view.
+    if parent_id is not None:
+        back_cb = f"nav:f:{parent_id}:0"
+        back_label = "🔙 Up One Level"
+    elif category_id is not None:
+        back_cb = f"nav:c:{category_id}:0"
+        back_label = "🔙 Back to Category"
+    else:
+        back_cb = "cat_main"
+        back_label = "🔙 Back to Main Menu"
+
     keyboard.row(InlineKeyboardButton("📥 Download All", callback_data=f"dl:{folder_id}"))
-    keyboard.row(InlineKeyboardButton("🔙 Back", callback_data=f"nav:f:{folder_id}:0"))
+    keyboard.row(InlineKeyboardButton(back_label, callback_data=back_cb))
     
     try:
         await bot.edit_message_text(
@@ -1329,10 +1253,11 @@ async def _cb_hist_list(cq: types.CallbackQuery, bot, user_id: int) -> None:
     if not history:
         text += "No recent downloads recorded yet."
     else:
-        for fid, name, emoji, downloaded_at in history:
+        for fid, name, emoji, downloaded_at, has_children in history:
             ts = downloaded_at.strftime("%d/%m/%Y") if downloaded_at else ""
             text += f"• {emoji} <code>{esc(name)}</code> (Downloaded {ts})\n"
-            keyboard.row(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"fi:{fid}:0"))
+            callback_data = f"nav:f:{fid}:0" if has_children else f"fi:{fid}:0"
+            keyboard.row(InlineKeyboardButton(f"{emoji} {name}", callback_data=callback_data))
             
     keyboard.row(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="cat_main"))
     
@@ -1362,10 +1287,11 @@ async def _cb_new_list(cq: types.CallbackQuery, bot, user_id: int) -> None:
     if not new_folders:
         text += "No folders added recently."
     else:
-        for fid, name, emoji, created_at, file_count in new_folders:
+        for fid, name, emoji, created_at, file_count, has_children in new_folders:
             ts = created_at.strftime("%d/%m/%Y") if created_at else ""
             text += f"• {emoji} <code>{esc(name)}</code> ({file_count} files, Added {ts})\n"
-            keyboard.row(InlineKeyboardButton(f"{emoji} {name} ({file_count})", callback_data=f"fi:{fid}:0"))
+            callback_data = f"nav:f:{fid}:0" if has_children else f"fi:{fid}:0"
+            keyboard.row(InlineKeyboardButton(f"{emoji} {name} ({file_count})", callback_data=callback_data))
             
     keyboard.row(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="cat_main"))
     

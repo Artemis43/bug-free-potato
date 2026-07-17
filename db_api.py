@@ -1499,8 +1499,10 @@ def main():
                 category_id = int(category_id)
             else:
                 category_id = None
-            emoji = params.get("emoji", "📁").strip() or "📁"
-            description = params.get("description", "").strip() or None
+            emoji = params.get("emoji") or "📁"
+            emoji = emoji.strip() if emoji else "📁"
+            desc_val = params.get("description")
+            description = desc_val.strip() if desc_val else None
             folder_type = params.get("type", "free")
             is_premium = folder_type == "premium"
             is_paid = folder_type == "paid"
@@ -1617,31 +1619,58 @@ def main():
         elif action == "folder_delete":
             folder_id = int(params["id"] if "id" in params else params["folder_id"])
             
-            # Fetch folder location info for message cleanup
-            locations = db.db_fetchall(
+            # E3: Find ALL descendant folders recursively so no sub-folders are orphaned
+            all_folder_ids_rows = db.db_fetchall(
                 """
-                SELECT sc.chat_id, fl.message_id
-                FROM file_locations fl
-                JOIN files f             ON f.id = fl.file_id
-                JOIN storage_channels sc ON sc.id = fl.channel_id
-                WHERE f.folder_id = %s
+                WITH RECURSIVE subtree AS (
+                    SELECT id FROM folders WHERE id = %s
+                    UNION ALL
+                    SELECT f.id FROM folders f JOIN subtree s ON f.parent_id = s.id
+                )
+                SELECT id FROM subtree
                 """,
                 (folder_id,)
+            )
+            all_folder_ids = [r[0] for r in (all_folder_ids_rows or [])]
+            
+            if not all_folder_ids:
+                # Folder doesn't exist — still report OK
+                print(json.dumps({"ok": True, "deleted_telegram_messages": 0}))
+                return
+
+            # Fetch all Telegram message locations for every folder in the subtree
+            placeholders = ','.join(['%s'] * len(all_folder_ids))
+            locations = db.db_fetchall(
+                f"""
+                SELECT sc.chat_id, fl.message_id
+                FROM file_locations fl
+                JOIN files f             ON f.id = fl.file_pk
+                JOIN storage_channels sc ON sc.id = fl.channel_id
+                WHERE f.folder_id IN ({placeholders})
+                """,
+                tuple(all_folder_ids)
             )
             
             # Try deleting from Telegram channels
             deleted_count = 0
-            for chat_id, msg_id in (locations or []):
+            for chat_id_tg, msg_id in (locations or []):
                 if msg_id:
                     try:
-                        delete_telegram_msg(chat_id, msg_id)
+                        delete_telegram_msg(chat_id_tg, msg_id)
                         deleted_count += 1
                     except Exception:
                         pass
                         
-            # Deleting files (cascades to file_locations)
-            db.db_execute("DELETE FROM files WHERE folder_id = %s", (folder_id,))
-            db.db_execute("DELETE FROM folders WHERE id = %s", (folder_id,))
+            # Delete files for all folders in subtree (cascades to file_locations)
+            db.db_execute(
+                f"DELETE FROM files WHERE folder_id IN ({placeholders})",
+                tuple(all_folder_ids)
+            )
+            # Delete all folders in subtree starting from deepest to avoid FK conflicts
+            db.db_execute(
+                f"DELETE FROM folders WHERE id IN ({placeholders})",
+                tuple(all_folder_ids)
+            )
 
             # Trigger catalog auto-update
             try:

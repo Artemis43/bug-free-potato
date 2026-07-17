@@ -17,7 +17,11 @@ from middlewares.authorization import (
 )
 from utils.bot_ref import get_bot
 from utils.bots import get_current_bot_pk, get_servable_locations
-from utils.database import db_execute, db_fetchall, db_fetchone
+from utils.database import (
+    db_execute, db_fetchall, db_fetchone,
+    get_effective_access_type, get_subtree_files, get_folder_direct_file_count,
+    record_download_history,
+)
 from utils.helpers import esc, notify_admin_for_approval, notify_admin_for_approval_again
 from utils.keyboard import InlineBuilder
 import utils.progress as progress
@@ -89,15 +93,10 @@ async def _run_download(
     except Exception:
         pass
 
-    # ── Fetch files first so we know the total ────────────────────────────
-    # We fetch the logical file id and resolve a storage channel to copy from
-    # per file at send time (see the loop). file_id is NOT used for delivery —
-    # Telegram file_ids are bot-specific, so files are served via copy_message
-    # from a storage channel this bot administers.
-    files = db_fetchall(
-        'SELECT id, file_name FROM files WHERE folder_id = %s ORDER BY id',
-        (folder_id,)
-    )
+    # ── Fetch files (recursive — includes all sub-folder files) ──────────────────
+    # We use get_subtree_files to collect files from this folder AND all nested
+    # sub-folders, so pressing “Download All” on a parent delivers everything.
+    files = get_subtree_files(folder_id)
     if not files:
         await bot.send_message(
             chat_id,
@@ -398,6 +397,24 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
         return False
 
     _, folder_name, is_premium_folder, requires_admin_approval = folder_info
+
+    # ── Effective access check: walk the ancestor chain ──────────────────────────
+    # A free sub-folder under a premium parent should still be gated.
+    access_type, gate_folder_id = get_effective_access_type(folder_id)
+    if access_type == 'premium' and not is_premium_folder:
+        # This folder itself is free but an ancestor is premium — treat as premium
+        is_premium_folder = True
+    if access_type == 'paid' and not requires_admin_approval:
+        # This folder itself is free but an ancestor is paid — treat as paid
+        # Look up the gate folder details for the payment flow
+        gate_row = db_fetchone(
+            'SELECT name FROM folders WHERE id = %s', (gate_folder_id,)
+        )
+        if gate_row:
+            requires_admin_approval = True
+            # Redirect the payment/approval gate to the actual paid ancestor folder
+            folder_id = gate_folder_id
+            folder_name = gate_row[0]
 
     if is_premium_folder and not is_premium:
         from config import PAYMENT_MODE as _PAYMENT_MODE

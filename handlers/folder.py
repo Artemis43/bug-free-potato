@@ -190,7 +190,12 @@ async def delete_folder(message: types.Message):
         return
 
     folder_id  = folder_row[0]
-    file_count = db_fetchone('SELECT COUNT(*) FROM files WHERE folder_id = %s', (folder_id,))[0]
+    # E2: Use recursive count for better info in confirmation dialog
+    from utils.database import get_subtree_file_count
+    file_count = get_subtree_file_count(folder_id)
+    subfolder_count = db_fetchone(
+        'SELECT COUNT(*) FROM folders WHERE parent_id = %s', (folder_id,)
+    )[0]
 
     # Store pending deletion in start.py's shared dict
     from handlers.start import _pending_deletions
@@ -201,11 +206,12 @@ async def delete_folder(message: types.Message):
         InlineKeyboardButton("✅ Yes, delete", callback_data=f"dfc:{folder_id}"),
         InlineKeyboardButton("❌ Cancel",       callback_data="dfc_cancel"),
     )
+    sub_notice = f"\n📂 Sub-folders: {subfolder_count} (will also be deleted)" if subfolder_count else ""
     await message.reply(
         f"⚠️ <b>Confirm Deletion</b>\n\n"
         f"📁 Folder: <b>{esc(folder_name)}</b>\n"
-        f"📄 Files: {file_count}\n\n"
-        f"This will permanently delete the folder and all {file_count} file(s) "
+        f"📄 Total Files: {file_count} (incl. all sub-folders){sub_notice}\n\n"
+        f"This will permanently delete the folder, all sub-folders, and all {file_count} file(s) "
         f"from the archive channel. This <b>cannot be undone</b>.",
         parse_mode=ParseMode.HTML,
         reply_markup=kb.build()
@@ -213,7 +219,9 @@ async def delete_folder(message: types.Message):
 
 
 async def execute_folder_deletion(bot, original_message, folder_id: int, folder_name: str):
-    """Step 2: perform the actual deletion (called from start.process_callback)."""
+    """Step 2: perform the actual deletion (called from start.process_callback).
+    E2: Recursively deletes all descendant sub-folders so nothing is orphaned.
+    """
     row = db_fetchone('SELECT id FROM folders WHERE id = %s', (folder_id,))
     if not row:
         await bot.edit_message_text(
@@ -224,19 +232,36 @@ async def execute_folder_deletion(bot, original_message, folder_id: int, folder_
         )
         return
 
-    # Gather every physical copy of this folder's files across ALL storage
-    # channels (active or not — a disabled channel may still hold messages we
-    # should clean up). One file can have several copies; we delete each.
-    locations = db_fetchall(
+    # E2: Find ALL descendant folders recursively
+    all_ids_rows = db_fetchall(
         '''
-        SELECT sc.chat_id, fl.message_id
-        FROM file_locations fl
-        JOIN files f             ON f.id = fl.file_pk
-        JOIN storage_channels sc ON sc.id = fl.channel_id
-        WHERE f.folder_id = %s
+        WITH RECURSIVE subtree AS (
+            SELECT id FROM folders WHERE id = %s
+            UNION ALL
+            SELECT f.id FROM folders f JOIN subtree s ON f.parent_id = s.id
+        )
+        SELECT id FROM subtree
         ''',
         (folder_id,)
     )
+    all_folder_ids = [r[0] for r in (all_ids_rows or [folder_id])]
+
+    # Gather every physical copy across ALL storage channels for all folders
+    if all_folder_ids:
+        placeholders = ','.join(['%s'] * len(all_folder_ids))
+        locations = db_fetchall(
+            f'''
+            SELECT sc.chat_id, fl.message_id
+            FROM file_locations fl
+            JOIN files f             ON f.id = fl.file_pk
+            JOIN storage_channels sc ON sc.id = fl.channel_id
+            WHERE f.folder_id IN ({placeholders})
+            ''',
+            tuple(all_folder_ids)
+        )
+    else:
+        locations = []
+
     total_copies  = len(locations)
     deleted_count = 0
 
@@ -251,15 +276,20 @@ async def execute_folder_deletion(bot, original_message, folder_id: int, folder_
         except Exception as e:
             logging.error(f"Error deleting message {msg_id} in channel {chat_id}: {e}")
 
-    # Deleting the files cascades to file_locations (ON DELETE CASCADE).
-    db_execute('DELETE FROM files   WHERE folder_id = %s', (folder_id,))
-    db_execute('DELETE FROM folders WHERE id = %s',        (folder_id,))
+    # Delete files for all folders in subtree (cascades to file_locations)
+    if all_folder_ids:
+        placeholders = ','.join(['%s'] * len(all_folder_ids))
+        db_execute(f'DELETE FROM files WHERE folder_id IN ({placeholders})', tuple(all_folder_ids))
+        db_execute(f'DELETE FROM folders WHERE id IN ({placeholders})', tuple(all_folder_ids))
 
+    subfolder_count = max(0, len(all_folder_ids) - 1)  # subtract the root folder itself
+    sub_notice = f" ({subfolder_count} sub-folder(s) also removed)" if subfolder_count else ""
     await bot.edit_message_text(
         f"✅ <b>Folder Deleted</b>\n\n"
-        f"📁 {esc(folder_name)}\n"
+        f"📁 {esc(folder_name)}{sub_notice}\n"
         f"🗑 {deleted_count}/{total_copies} channel copies removed.",
         parse_mode=ParseMode.HTML,
         chat_id=original_message.chat.id,
         message_id=original_message.message_id
     )
+    _trigger_catalog_update()

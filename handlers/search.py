@@ -63,13 +63,15 @@ def _search_prompt_keyboard() -> InlineKeyboardMarkup:
 
 def _search_result_keyboard(results) -> InlineKeyboardMarkup:
     kb = InlineBuilder()
-    for folder_id, name, file_count, premium, admin_approval, category_name in results:
+    for folder_id, name, file_count, premium, admin_approval, category_name, path, has_children in results:
         file_count = file_count or 0
         icon = "⭐" if premium else ("💰" if admin_approval else "📁")
         label = f"{icon} {name} ({file_count})"
         if len(label) > 36:
             label = label[:33] + "…"
-        kb.row(InlineKeyboardButton(label, callback_data=f"dl:{folder_id}"))
+        # Route to sub-folder browser for parent folders, file preview for leaf folders
+        callback_data = f"nav:f:{folder_id}:0" if has_children else f"fi:{folder_id}:0"
+        kb.row(InlineKeyboardButton(label, callback_data=callback_data))
     kb.row(
         InlineKeyboardButton("🔍 Search Again", callback_data="search"),
         InlineKeyboardButton("🔙 Menu", callback_data="cat_main"),
@@ -218,13 +220,14 @@ async def _execute_search(chat_id: int, query: str, state: FSMContext, reply_fn=
         "<b>──────────────────────────────────</b>",
         "",
     ]
-    for folder_id, name, file_count, premium, admin_approval, category_name in results:
+    for folder_id, name, file_count, premium, admin_approval, category_name, path, has_children in results:
         file_count = file_count or 0
         icon = "⭐" if premium else ("💰" if admin_approval else "📁")
         cat_tag = f" <i>[{esc(category_name)}]</i>" if category_name else ""
-        lines.append(f"  {icon} <code>{esc(name)}</code>{cat_tag} ({file_count} files)")
+        sub_tag = " 📂" if has_children else ""
+        lines.append(f"  {icon} <code>{esc(name)}</code>{cat_tag} ({file_count} files){sub_tag}")
 
-    lines.append(f"\n<i>Showing {len(results)} result(s) — tap to download</i>")
+    lines.append(f"\n<i>Showing {len(results)} result(s) — tap to browse or download</i>")
     text = '\n'.join(lines)
     kb = _search_result_keyboard(results)
 
@@ -279,7 +282,7 @@ async def inline_search_handler(inline_query: types.InlineQuery):
         bot_username = ""
 
     articles = []
-    for folder_id, name, file_count, premium, admin_approval, category_name in results_data:
+    for folder_id, name, file_count, premium, admin_approval, category_name, path, has_children in results_data:
         file_count = file_count or 0
         icon = "⭐" if premium else ("💰" if admin_approval else "📁")
         badge_text = "Premium" if premium else ("Paid" if admin_approval else "Free")

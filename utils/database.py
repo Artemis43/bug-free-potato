@@ -637,7 +637,8 @@ def search_folders(query: str, limit: int = 15):
                COUNT(fi.id) AS file_count,
                f.premium, f.admin_approval,
                COALESCE(c.name, 'Uncategorized') AS category_name,
-               COALESCE(c.name || ' > ', '') || f.name AS path
+               COALESCE(c.name || ' > ', '') || f.name AS path,
+               (SELECT COUNT(*) FROM folders sf WHERE sf.parent_id = f.id) > 0 AS has_children
         FROM folders f
         LEFT JOIN files      fi ON fi.folder_id = f.id
         LEFT JOIN categories c  ON c.id = f.category_id
@@ -713,6 +714,60 @@ def search_folders(query: str, limit: int = 15):
 
 # ── Hierarchy navigation helpers ────────────────────────────────────────────────
 
+def get_effective_access_type(folder_id: int):
+    """
+    Walk up the parent_id chain and return the most restrictive access type
+    that applies to this folder or any of its ancestors.
+    Returns ('premium', gate_folder_id) | ('paid', gate_folder_id) | ('free', None)
+    """
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        fid = folder_id
+        seen = set()
+        while fid and fid not in seen:
+            seen.add(fid)
+            cur.execute(
+                "SELECT id, name, premium, admin_approval, parent_id FROM folders WHERE id = %s",
+                (fid,)
+            )
+            row = cur.fetchone()
+            if not row:
+                break
+            _, _name, is_premium, is_paid, parent = row
+            if is_premium:
+                return ('premium', fid)
+            if is_paid:
+                return ('paid', fid)
+            fid = parent
+        return ('free', None)
+    finally:
+        _release(conn)
+
+
+def get_subtree_files(folder_id: int):
+    """Recursively fetch all files in this folder and all descendant folders.
+    Returns list of (file_id, file_name).
+    """
+    return db_fetchall("""
+        WITH RECURSIVE subtree AS (
+            SELECT id FROM folders WHERE id = %s
+            UNION ALL
+            SELECT f.id FROM folders f
+            JOIN subtree s ON f.parent_id = s.id
+        )
+        SELECT fi.id, fi.file_name
+        FROM files fi
+        WHERE fi.folder_id IN (SELECT id FROM subtree)
+        ORDER BY fi.folder_id, fi.id
+    """, (folder_id,))
+
+
+def get_folder_direct_file_count(folder_id: int) -> int:
+    """Count direct (non-recursive) files in a folder."""
+    row = db_fetchone("SELECT COUNT(*) FROM files WHERE folder_id = %s", (folder_id,))
+    return row[0] if row else 0
+
 def get_child_folders(parent_id=None, category_id=None):
     """
     Get immediate child folders of a parent_id, OR root folders in a category.
@@ -722,15 +777,21 @@ def get_child_folders(parent_id=None, category_id=None):
     try:
         cur = conn.cursor()
         if parent_id is not None:
-            # Sub-folders of a folder
+            # Sub-folders of a folder — show total recursive file count
             cur.execute("""
                 SELECT f.id, f.name, COALESCE(f.emoji, '📁'), f.premium, f.admin_approval,
-                       COUNT(fi.id) AS file_count,
+                       (
+                           SELECT COUNT(*) FROM files fi2
+                           WHERE fi2.folder_id IN (
+                               WITH RECURSIVE sub AS (
+                                   SELECT id FROM folders WHERE id = f.id
+                                   UNION ALL SELECT ch.id FROM folders ch JOIN sub ON ch.parent_id = sub.id
+                               ) SELECT id FROM sub
+                           )
+                       ) AS total_file_count,
                        (SELECT COUNT(*) FROM folders sf WHERE sf.parent_id = f.id) > 0 AS has_children
                 FROM folders f
-                LEFT JOIN files fi ON fi.folder_id = f.id
                 WHERE f.parent_id = %s
-                GROUP BY f.id
                 ORDER BY COALESCE(f.sort_order, 0), f.name
             """, (parent_id,))
         elif category_id is not None:
@@ -738,24 +799,36 @@ def get_child_folders(parent_id=None, category_id=None):
                 # Uncategorized — root folders with no category and no parent
                 cur.execute("""
                     SELECT f.id, f.name, COALESCE(f.emoji, '📁'), f.premium, f.admin_approval,
-                           COUNT(fi.id) AS file_count,
+                           (
+                               SELECT COUNT(*) FROM files fi2
+                               WHERE fi2.folder_id IN (
+                                   WITH RECURSIVE sub AS (
+                                       SELECT id FROM folders WHERE id = f.id
+                                       UNION ALL SELECT ch.id FROM folders ch JOIN sub ON ch.parent_id = sub.id
+                                   ) SELECT id FROM sub
+                               )
+                           ) AS total_file_count,
                            (SELECT COUNT(*) FROM folders sf WHERE sf.parent_id = f.id) > 0 AS has_children
                     FROM folders f
-                    LEFT JOIN files fi ON fi.folder_id = f.id
                     WHERE f.category_id IS NULL AND f.parent_id IS NULL
-                    GROUP BY f.id
                     ORDER BY COALESCE(f.sort_order, 0), f.name
                 """)
             else:
                 # Root folders in a specific category
                 cur.execute("""
                     SELECT f.id, f.name, COALESCE(f.emoji, '📁'), f.premium, f.admin_approval,
-                           COUNT(fi.id) AS file_count,
+                           (
+                               SELECT COUNT(*) FROM files fi2
+                               WHERE fi2.folder_id IN (
+                                   WITH RECURSIVE sub AS (
+                                       SELECT id FROM folders WHERE id = f.id
+                                       UNION ALL SELECT ch.id FROM folders ch JOIN sub ON ch.parent_id = sub.id
+                                   ) SELECT id FROM sub
+                               )
+                           ) AS total_file_count,
                            (SELECT COUNT(*) FROM folders sf WHERE sf.parent_id = f.id) > 0 AS has_children
                     FROM folders f
-                    LEFT JOIN files fi ON fi.folder_id = f.id
                     WHERE f.category_id = %s AND f.parent_id IS NULL
-                    GROUP BY f.id
                     ORDER BY COALESCE(f.sort_order, 0), f.name
                 """, (category_id,))
         return cur.fetchall()
@@ -947,9 +1020,11 @@ def record_download_history(user_id: int, folder_id: int):
 
 
 def get_recent_downloads(user_id: int, limit: int = 10):
-    """Get recently downloaded folders for a user. Returns (id, name, emoji, downloaded_at)."""
+    """Get recently downloaded folders for a user.
+    Returns (id, name, emoji, downloaded_at, has_children)."""
     return db_fetchall("""
-        SELECT DISTINCT ON (f.id) f.id, f.name, COALESCE(f.emoji, '📁'), dh.downloaded_at
+        SELECT DISTINCT ON (f.id) f.id, f.name, COALESCE(f.emoji, '📁'), dh.downloaded_at,
+               (SELECT COUNT(*) FROM folders sf WHERE sf.parent_id = f.id) > 0 AS has_children
         FROM download_history dh
         JOIN folders f ON f.id = dh.folder_id
         WHERE dh.user_id = %s
@@ -959,14 +1034,22 @@ def get_recent_downloads(user_id: int, limit: int = 10):
 
 
 def get_recently_added_folders(limit: int = 5):
-    """Get the most recently created folders (for What's New section)."""
+    """Get the most recently created folders (for What's New section).
+    Returns (id, name, emoji, created_at, file_count, has_children)."""
     return db_fetchall("""
         SELECT f.id, f.name, COALESCE(f.emoji, '📁'), f.created_at,
-               COUNT(fi.id) AS file_count
+               (
+                   SELECT COUNT(*) FROM files fi2
+                   WHERE fi2.folder_id IN (
+                       WITH RECURSIVE sub AS (
+                           SELECT id FROM folders WHERE id = f.id
+                           UNION ALL SELECT ch.id FROM folders ch JOIN sub ON ch.parent_id = sub.id
+                       ) SELECT id FROM sub
+                   )
+               ) AS total_file_count,
+               (SELECT COUNT(*) FROM folders sf WHERE sf.parent_id = f.id) > 0 AS has_children
         FROM folders f
-        LEFT JOIN files fi ON fi.folder_id = f.id
         WHERE f.created_at IS NOT NULL
-        GROUP BY f.id
         ORDER BY f.created_at DESC
         LIMIT %s
     """, (limit,))
