@@ -9,7 +9,7 @@ from aiogram.exceptions import TelegramBadRequest as MessageNotModified
 from aiogram.types import InlineKeyboardMarkup
 from utils.keyboard import IKB as InlineKeyboardButton
 
-from config import ADMIN_CONTACT, PAYMENT_MODE, REQUIRED_CHANNELS
+from config import ADMIN_CONTACT, PAYMENT_MODE, REQUIRED_CHANNELS, REQUIRE_APPROVAL
 from middlewares.authorization import (
     invalidate_member_cache,
     is_private_chat,
@@ -405,7 +405,7 @@ async def _check_and_start_download(bot, chat_id: int, user_id: int,
         (user_id,)
     )
 
-    if not user_info or user_info[0] != 'approved':
+    if not user_info or (REQUIRE_APPROVAL and user_info[0] != 'approved'):
         await overlay("You're not authorized. Please wait for admin approval.")
         return False
 

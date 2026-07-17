@@ -18,7 +18,7 @@ from utils.database import (
     record_download_history, get_folder_direct_file_count,
 )
 from utils.helpers import notify_admins, esc
-from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, ADMIN_CONTACT, PAYMENT_MODE, BOT_NAME
+from config import REQUIRED_CHANNELS, STICKER_ID, ADMIN_IDS, ADMIN_CONTACT, PAYMENT_MODE, BOT_NAME, REQUIRE_APPROVAL, SEND_STICKER
 from datetime import datetime, timedelta
 
 router = Router()
@@ -41,7 +41,7 @@ _pending_deletions: dict = {}
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def send_sticker_safe(bot, chat_id: int, delay: float = 2.0):
-    if not STICKER_ID:
+    if not SEND_STICKER or not STICKER_ID:
         return None
     try:
         msg = await bot.send_sticker(chat_id, STICKER_ID)
@@ -252,7 +252,7 @@ async def _cb_page(cq: types.CallbackQuery, bot, user_id: int) -> None:
         page = 0
 
     user_row = db_fetchone('SELECT status FROM users WHERE user_id = %s', (user_id,))
-    if (user_row[0] if user_row else 'pending') != 'approved':
+    if REQUIRE_APPROVAL and (user_row[0] if user_row else 'pending') != 'approved':
         await bot.answer_callback_query(
             cq.id, "You are not yet approved. Please wait for admin approval.", show_alert=True
         )
@@ -279,7 +279,7 @@ async def _cb_category(cq: types.CallbackQuery, bot, user_id: int) -> None:
         return
 
     user_row = db_fetchone('SELECT status FROM users WHERE user_id = %s', (user_id,))
-    if (user_row[0] if user_row else 'pending') != 'approved':
+    if REQUIRE_APPROVAL and (user_row[0] if user_row else 'pending') != 'approved':
         await cq.answer("Not yet approved.", show_alert=True)
         return
 
@@ -296,7 +296,7 @@ async def _cb_category(cq: types.CallbackQuery, bot, user_id: int) -> None:
 async def _cb_category_main(cq: types.CallbackQuery, bot, user_id: int) -> None:
     """cat_main — go back to the categories overview (main menu)."""
     user_row = db_fetchone('SELECT status FROM users WHERE user_id = %s', (user_id,))
-    if (user_row[0] if user_row else 'pending') != 'approved':
+    if REQUIRE_APPROVAL and (user_row[0] if user_row else 'pending') != 'approved':
         await cq.answer("Not yet approved.", show_alert=True)
         return
 
@@ -1431,6 +1431,15 @@ async def handle_start(message: types.Message):
         return
 
     status, welcome_sent = user
+
+    # ── AUTO-APPROVE (when REQUIRE_APPROVAL is disabled) ──────────────────
+    if not REQUIRE_APPROVAL and status in ('pending', 'rejected'):
+        # Silently approve and treat as a normal approved user
+        db_execute(
+            "UPDATE users SET status = 'approved' WHERE user_id = %s",
+            (user_id,)
+        )
+        status = 'approved'
 
     # ── PENDING ────────────────────────────────────────────────────────────
     if status == 'pending':

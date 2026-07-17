@@ -25,7 +25,7 @@ from aiogram.types import (
     InputTextMessageContent,
 )
 
-from config import ADMIN_CONTACT
+from config import ADMIN_CONTACT, REQUIRE_APPROVAL
 from middlewares.authorization import is_private_chat
 from utils.bot_ref import get_bot
 from utils.database import db_fetchone, search_folders
@@ -99,7 +99,7 @@ async def cmd_search(message: types.Message, state: FSMContext):
 
     user_id = message.from_user.id
     user_row = db_fetchone("SELECT status FROM users WHERE user_id = %s", (user_id,))
-    if not user_row or user_row[0] != 'approved':
+    if REQUIRE_APPROVAL and (not user_row or user_row[0] != 'approved'):
         await message.reply("Please wait for admin approval before searching.")
         return
 
@@ -127,7 +127,7 @@ async def cb_search(cq: types.CallbackQuery, state: FSMContext = None):
     """Callback: 🔍 Search button in the main menu."""
     user_id = cq.from_user.id
     user_row = db_fetchone("SELECT status FROM users WHERE user_id = %s", (user_id,))
-    if not user_row or user_row[0] != 'approved':
+    if REQUIRE_APPROVAL and (not user_row or user_row[0] != 'approved'):
         await cq.answer("Not authorized.", show_alert=True)
         return
 
@@ -251,7 +251,7 @@ async def inline_search_handler(inline_query: types.InlineQuery):
 
     # Only serve approved users in inline mode
     user_row = db_fetchone("SELECT status FROM users WHERE user_id = %s", (user_id,))
-    if not user_row or user_row[0] != 'approved':
+    if REQUIRE_APPROVAL and (not user_row or user_row[0] != 'approved'):
         await inline_query.answer(
             results=[],
             cache_time=10,

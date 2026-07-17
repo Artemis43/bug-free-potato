@@ -62,6 +62,18 @@ LOG_LEVEL       = os.environ.get('LOG_LEVEL', 'INFO').upper()
 # Set to 0 to always notify (not recommended for busy bots).
 NOTIFY_COOLDOWN_HOURS = int(os.environ.get('NOTIFY_COOLDOWN_HOURS', '4'))
 
+# ── Access Control ────────────────────────────────────────────────────────────
+# When True (default), new users must be approved by an admin before they can
+# access the bot. When False, all users are auto-approved on first /start and
+# the pending/rejected flow is skipped entirely.
+REQUIRE_APPROVAL = os.environ.get('REQUIRE_APPROVAL', 'true').lower() in ('true', '1', 'yes')
+
+# ── Sticker on Start ─────────────────────────────────────────────────────────
+# When True (default), the bot sends the STICKER env sticker on /start before
+# showing the main menu (with a brief delay). When False, the sticker is
+# skipped and the main menu appears instantly.
+SEND_STICKER = os.environ.get('SEND_STICKER', 'true').lower() in ('true', '1', 'yes')
+
 # ── Startup validation ─────────────────────────────────────────────────────
 # Fail fast with a clear message instead of crashing later inside aiogram /
 # psycopg2 when a required variable is missing or misconfigured.
