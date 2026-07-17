@@ -94,9 +94,10 @@ async def _run_download(
         pass
 
     # ── Fetch files (recursive — includes all sub-folder files) ──────────────────
-    # We use get_subtree_files to collect files from this folder AND all nested
-    # sub-folders, so pressing “Download All” on a parent delivers everything.
-    files = get_subtree_files(folder_id)
+    # Returns (file_id, file_name, sub_folder_id, sub_folder_name) so we can
+    # insert separator headers between sub-folder groups in the chat.
+    files_with_context = get_subtree_files(folder_id)
+    files = [(fid, fname) for fid, fname, _sfid, _sfname in files_with_context]
     if not files:
         await bot.send_message(
             chat_id,
@@ -180,6 +181,30 @@ async def _run_download(
     # Record cooldown before sending (prevents re-download on crash)
     db_execute('UPDATE users SET last_download = %s WHERE user_id = %s', (datetime.now(), user_id))
 
+    # ── Build sub-folder group info for separator headers ─────────────────
+    # Count files per sub-folder so separators show "X files"
+    subfolder_file_counts: dict[int, int] = {}
+    subfolder_names: dict[int, str] = {}
+    for _fid, _fname, sfid, sfname in files_with_context:
+        subfolder_file_counts[sfid] = subfolder_file_counts.get(sfid, 0) + 1
+        subfolder_names[sfid] = sfname
+    has_multiple_folders = len(subfolder_file_counts) > 1
+
+    # Build breadcrumb paths relative to the download root folder
+    subfolder_paths: dict[int, str] = {}
+    if has_multiple_folders:
+        from utils.database import get_folder_breadcrumb
+        root_crumbs = get_folder_breadcrumb(folder_id)
+        root_depth = len(root_crumbs)
+        for sfid in subfolder_names:
+            if sfid == folder_id:
+                subfolder_paths[sfid] = subfolder_names[sfid]
+            else:
+                crumbs = get_folder_breadcrumb(sfid)
+                # Show path relative to root: include root and everything below
+                relative = crumbs[root_depth - 1:] if root_depth > 0 else crumbs
+                subfolder_paths[sfid] = " \u27a4 ".join(name for _, name, _ in relative)
+
     # ── Send files with live progress ─────────────────────────────────────
     messages_to_delete: list[int] = []
     unavailable = 0
@@ -187,11 +212,31 @@ async def _run_download(
     if bot_pk is None:
         log.error("This bot is not registered (bot_pk is None); cannot serve files.")
 
-    for index, (file_pk, file_name) in enumerate(files):
+    current_subfolder_id = None  # Track which sub-folder we're sending from
+
+    for index, (file_pk, file_name, sub_folder_id, sub_folder_name) in enumerate(files_with_context):
         # Check for cancel signal
         if progress.is_cancelled(chat_id):
             log.info(f"Download cancelled by user {user_id} at file {index + 1}/{n}")
             break
+
+        # ── Sub-folder separator header ───────────────────────────────
+        # When entering a new sub-folder's files, send a lightweight text
+        # header so the user can tell which files belong where.
+        if has_multiple_folders and sub_folder_id != current_subfolder_id:
+            current_subfolder_id = sub_folder_id
+            sf_count = subfolder_file_counts.get(sub_folder_id, 0)
+            sf_path = subfolder_paths.get(sub_folder_id, sub_folder_name)
+            try:
+                sep_msg = await bot.send_message(
+                    chat_id,
+                    f"\ud83d\udcc2 <b>{esc(sf_path)}</b>\n"
+                    f"\u2514\u2500 {sf_count} file{'s' if sf_count != 1 else ''}",
+                    parse_mode=ParseMode.HTML,
+                )
+                messages_to_delete.append(sep_msg.message_id)
+            except Exception:
+                pass
 
         # Serve by copying the file from a storage channel THIS bot is paired
         # with, trying each in turn — that fallback IS the redundancy (see

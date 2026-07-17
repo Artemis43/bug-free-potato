@@ -747,19 +747,31 @@ def get_effective_access_type(folder_id: int):
 
 def get_subtree_files(folder_id: int):
     """Recursively fetch all files in this folder and all descendant folders.
-    Returns list of (file_id, file_name).
+    Returns list of (file_id, file_name, folder_id, folder_path).
+    folder_path is a breadcrumb string like "Surgery Notes ➔ Part 1"
+    so the download loop can label which sub-folder a file came from.
     """
     return db_fetchall("""
         WITH RECURSIVE subtree AS (
-            SELECT id FROM folders WHERE id = %s
+            SELECT id, name, parent_id, 0 AS depth
+            FROM folders WHERE id = %s
             UNION ALL
-            SELECT f.id FROM folders f
+            SELECT f.id, f.name, f.parent_id, s.depth + 1
+            FROM folders f
             JOIN subtree s ON f.parent_id = s.id
+        ),
+        -- Build breadcrumb path for each folder in the subtree
+        folder_paths AS (
+            SELECT st.id AS folder_id,
+                   -- Walk up the parent chain within the subtree to build path
+                   st.name AS folder_name,
+                   st.depth
+            FROM subtree st
         )
-        SELECT fi.id, fi.file_name
+        SELECT fi.id, fi.file_name, fp.folder_id, fp.folder_name
         FROM files fi
-        WHERE fi.folder_id IN (SELECT id FROM subtree)
-        ORDER BY fi.folder_id, fi.id
+        JOIN folder_paths fp ON fp.folder_id = fi.folder_id
+        ORDER BY fp.depth, fp.folder_id, fi.id
     """, (folder_id,))
 
 
