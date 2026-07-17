@@ -1437,6 +1437,131 @@ def main():
 
                 print(json.dumps({"ok": True, "updated": updated}))
 
+        elif action == "bulk_folder_action":
+            """Bulk set type or other attributes on multiple folders."""
+            ids = [int(i) for i in params.get("ids", [])]
+            bulk_action = params.get("bulk_action", "")
+            if not ids:
+                print(json.dumps({"ok": False, "error": "No folder IDs provided"}))
+                return
+            updated = 0
+            if bulk_action == "set_free":
+                for fid in ids:
+                    db.db_execute("UPDATE folders SET premium = FALSE, admin_approval = FALSE WHERE id = %s", (fid,))
+                    updated += 1
+            elif bulk_action == "set_premium":
+                for fid in ids:
+                    db.db_execute("UPDATE folders SET premium = TRUE, admin_approval = FALSE WHERE id = %s", (fid,))
+                    updated += 1
+            elif bulk_action == "set_paid":
+                for fid in ids:
+                    db.db_execute("UPDATE folders SET premium = FALSE, admin_approval = TRUE WHERE id = %s", (fid,))
+                    updated += 1
+            else:
+                print(json.dumps({"ok": False, "error": f"Unknown bulk folder action: {bulk_action}"}))
+                return
+            db.db_execute(
+                "INSERT INTO admin_activity_log (action, target_type, target_id, detail) VALUES (%s, %s, %s, %s)",
+                (f"bulk_{bulk_action}", "folders", ",".join(str(i) for i in ids[:5]),
+                 f"{updated} folders affected")
+            )
+            print(json.dumps({"ok": True, "updated": updated}))
+
+        elif action == "bulk_file_action":
+            """Bulk set caption, move to folder, or delete multiple files."""
+            ids = [int(i) for i in params.get("ids", [])]
+            bulk_action = params.get("bulk_action", "")
+            if not ids:
+                print(json.dumps({"ok": False, "error": "No file IDs provided"}))
+                return
+            updated = 0
+            if bulk_action == "set_caption":
+                caption = params.get("caption", "")
+                for fid in ids:
+                    db.db_execute("UPDATE files SET caption = %s WHERE id = %s", (caption or None, fid))
+                    updated += 1
+            elif bulk_action == "move_folder":
+                folder_id = int(params.get("folder_id", 0))
+                if not folder_id:
+                    print(json.dumps({"ok": False, "error": "folder_id required for move_folder"}))
+                    return
+                if not db.db_fetchone("SELECT id FROM folders WHERE id = %s", (folder_id,)):
+                    print(json.dumps({"ok": False, "error": "Target folder does not exist"}))
+                    return
+                for fid in ids:
+                    db.db_execute("UPDATE files SET folder_id = %s WHERE id = %s", (folder_id, fid))
+                    updated += 1
+            elif bulk_action == "delete":
+                for fid in ids:
+                    db.db_execute("DELETE FROM file_locations WHERE file_id = %s", (fid,))
+                    db.db_execute("DELETE FROM files WHERE id = %s", (fid,))
+                    updated += 1
+            else:
+                print(json.dumps({"ok": False, "error": f"Unknown bulk file action: {bulk_action}"}))
+                return
+            print(json.dumps({"ok": True, "updated": updated}))
+
+        elif action == "bulk_folder_create":
+            """Create multiple folders at once with shared settings."""
+            names = params.get("names", [])
+            if not names or not isinstance(names, list):
+                print(json.dumps({"ok": False, "error": "names list is required"}))
+                return
+            emoji = (params.get("emoji") or "📁").strip() or "📁"
+            folder_type = params.get("type", "free")
+            is_premium = folder_type == "premium"
+            is_paid    = folder_type == "paid"
+            parent_id  = int(params["parent_id"]) if params.get("parent_id") else None
+            category_id = int(params["category_id"]) if params.get("category_id") else None
+            created = 0
+            skipped = 0
+            errors = []
+            for raw_name in names:
+                name = str(raw_name).strip()
+                if not name:
+                    continue
+                if db.db_fetchone("SELECT id FROM folders WHERE name = %s", (name,)):
+                    skipped += 1
+                    continue
+                try:
+                    db.db_execute(
+                        "INSERT INTO folders (name, parent_id, category_id, emoji, premium, admin_approval) "
+                        "VALUES (%s, %s, %s, %s, %s, %s)",
+                        (name, parent_id, category_id, emoji, is_premium, is_paid)
+                    )
+                    created += 1
+                except Exception as e:
+                    errors.append(f"{name}: {e}")
+            print(json.dumps({"ok": True, "created": created, "skipped": skipped, "errors": errors}))
+
+        elif action == "bulk_category_create":
+            """Create multiple categories at once."""
+            names = params.get("names", [])
+            if not names or not isinstance(names, list):
+                print(json.dumps({"ok": False, "error": "names list is required"}))
+                return
+            emoji = (params.get("emoji") or "📁").strip() or "📁"
+            parent_id = int(params["parent_id"]) if params.get("parent_id") else None
+            created = 0
+            skipped = 0
+            errors = []
+            for raw_name in names:
+                name = str(raw_name).strip()
+                if not name:
+                    continue
+                if db.db_fetchone("SELECT id FROM categories WHERE name = %s", (name,)):
+                    skipped += 1
+                    continue
+                try:
+                    db.db_execute(
+                        "INSERT INTO categories (name, emoji, parent_id) VALUES (%s, %s, %s)",
+                        (name, emoji, parent_id)
+                    )
+                    created += 1
+                except Exception as e:
+                    errors.append(f"{name}: {e}")
+            print(json.dumps({"ok": True, "created": created, "skipped": skipped, "errors": errors}))
+
         elif action == "get_tree":
             """Return the full hierarchical content tree for the dashboard."""
             import utils.database as _dbmod

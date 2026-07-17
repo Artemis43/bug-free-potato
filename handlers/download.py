@@ -20,7 +20,7 @@ from utils.bots import get_current_bot_pk, get_servable_locations
 from utils.database import (
     db_execute, db_fetchall, db_fetchone,
     get_effective_access_type, get_subtree_files, get_folder_direct_file_count,
-    record_download_history,
+    record_download_history, get_file_caption, get_active_caption,
 )
 from utils.helpers import esc, notify_admin_for_approval, notify_admin_for_approval_again
 from utils.keyboard import InlineBuilder
@@ -30,20 +30,26 @@ log = logging.getLogger(__name__)
 router = Router()
 
 
-async def _deliver_file(bot, chat_id: int, locations):
+async def _deliver_file(bot, chat_id: int, locations, caption_override: str = None):
     """Copy a file to the user from the first working storage channel.
 
     ``locations`` is an ordered list of ``(src_chat_id, src_message_id)`` the
     serving bot may copy from. Returns ``(sent, user_blocked)``:
-      - ``sent`` — the copy_message result, or None if no channel could serve it
+      - ``sent``         — the copy_message result, or None if no channel could serve it
       - ``user_blocked`` — True if the user has blocked the bot (caller aborts)
 
-    Trying each channel in turn is the delivery-time redundancy: if one channel
-    was taken down or the bot lost access, the next copy still delivers.
+    ``caption_override`` — when provided, replaces the original message caption
+    so per-file captions set via the dashboard are honoured at delivery time.
+    copy_message is used (not forward) so captions are overrideable.
     """
+    copy_kwargs = {}
+    if caption_override is not None:
+        copy_kwargs['caption'] = caption_override
+        copy_kwargs['parse_mode'] = 'HTML'
+
     for src_chat_id, src_msg_id in locations:
         try:
-            sent = await bot.copy_message(chat_id, src_chat_id, src_msg_id)
+            sent = await bot.copy_message(chat_id, src_chat_id, src_msg_id, **copy_kwargs)
             return sent, False
         except TelegramForbiddenError as e:
             # "bot was blocked by the user" is about the destination — abort.
@@ -205,6 +211,25 @@ async def _run_download(
                 relative = crumbs[root_depth - 1:] if root_depth > 0 else crumbs
                 subfolder_paths[sfid] = " \u27a4 ".join(name for _, name, _ in relative)
 
+    # ── Pre-fetch global caption (used as fallback when file has no custom caption) ──
+    _global_caption_type, _global_caption_text = get_active_caption()
+
+    def _resolve_caption(file_pk: int, file_name: str) -> str:
+        """Return the caption string to pass to copy_message for this file.
+        Priority: per-file caption > global caption > empty string (use stored).
+        When the result is an empty string, pass None so copy_message keeps
+        the original message caption unchanged.
+        """
+        # 1. Per-file override from dashboard
+        per_file = get_file_caption(file_pk)
+        if per_file:
+            return per_file
+        # 2. Global caption setting
+        if _global_caption_text and _global_caption_text.strip():
+            return _global_caption_text.strip()
+        # 3. No override — let copy_message keep the original channel caption
+        return None
+
     # ── Send files with live progress ─────────────────────────────────────
     messages_to_delete: list[int] = []
     unavailable = 0
@@ -239,10 +264,11 @@ async def _run_download(
                 pass
 
         # Serve by copying the file from a storage channel THIS bot is paired
-        # with, trying each in turn — that fallback IS the redundancy (see
-        # _deliver_file). copy_message preserves the stored caption.
+        # with. caption_override injects the per-file or global caption so that
+        # dashboard caption edits are reflected on delivery.
         locations = get_servable_locations(file_pk, bot_pk) if bot_pk else []
-        sent, user_blocked = await _deliver_file(bot, chat_id, locations)
+        caption_text = _resolve_caption(file_pk, file_name)
+        sent, user_blocked = await _deliver_file(bot, chat_id, locations, caption_override=caption_text)
 
         if user_blocked:
             log.warning(f"User {user_id} blocked bot mid-download.")

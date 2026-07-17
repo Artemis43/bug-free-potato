@@ -1175,10 +1175,19 @@ async def _cb_download_file(cq: types.CallbackQuery, bot, user_id: int) -> None:
     try:
         from utils.bots import get_current_bot_pk, get_servable_locations
         from handlers.download import _deliver_file
+        from utils.database import get_file_caption, get_active_caption
         me = await bot.me()
         bot_pk = get_current_bot_pk(me.username)
         locations = get_servable_locations(file_id, bot_pk) if bot_pk else []
-        sent, user_blocked = await _deliver_file(bot, user_id, locations)
+
+        # Resolve caption: per-file caption → global caption → None (keep original)
+        caption_text = get_file_caption(file_id)
+        if not caption_text:
+            _, global_text = get_active_caption()
+            if global_text and global_text.strip():
+                caption_text = global_text.strip()
+
+        sent, user_blocked = await _deliver_file(bot, user_id, locations, caption_override=caption_text)
         if user_blocked:
             return
         if sent is None:

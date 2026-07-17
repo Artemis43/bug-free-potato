@@ -608,6 +608,34 @@ def db_fetchall(query: str, params=None):
         _release(conn)
 
 
+# ── Caption helpers ────────────────────────────────────────────────────────────
+
+def get_file_caption(file_pk: int):
+    """Return the per-file caption stored in the DB, or None if unset.
+    Used by the download loop to override copy_message's baked-in caption
+    whenever the admin has set a custom caption for a specific file via the
+    dashboard.
+    """
+    row = db_fetchone('SELECT caption FROM files WHERE id = %s', (file_pk,))
+    if row and row[0] and row[0].strip():
+        return row[0].strip()
+    return None
+
+
+def get_active_caption():
+    """Return (caption_type, custom_text) from the current_caption table.
+    Falls back to (None, None) if the table is empty.
+    caption_type is typically 'custom' or 'append'.
+    """
+    row = db_fetchone(
+        'SELECT caption_type, custom_text FROM current_caption ORDER BY id DESC LIMIT 1'
+    )
+    if row:
+        return row[0], row[1]
+    return None, None
+
+
+
 def add_user_to_db(user_id: int, username: str = None, first_name: str = None):
     """Insert a new user or update their display info if they already exist."""
     db_execute(
